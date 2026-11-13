@@ -45,21 +45,23 @@ window.Api = (() => {
   const LANGUAGE_RULES = {
     en: 'Write in English (switch only if the user clearly writes in another language).',
     'zh-HK':
-      'Write reply, mood, affection_reason, remember and suggestions in colloquial Hong Kong Cantonese (廣東話口語) using Traditional Chinese characters, ' +
+      'Write reply, mood, affection_reason, remember, suggestions and key_moment in colloquial Hong Kong Cantonese (廣東話口語) using Traditional Chinese characters, ' +
       'the way Hongkongers really talk and text: 係、唔、咗、嘅、喺、啲、佢哋、乜嘢、點解、冇、嚟、俾、咁、喎、㗎、啩. ' +
       'Do not write Mandarin or formal written Chinese (avoid 是、不、了、他們、什麼、這裡). ' +
       'Natural English code-mixing is fine where a Hongkonger would use it. Keep people\'s names as they are.',
   };
 
+  const USER_GENDER = { man: ', a man', woman: ', a woman' };
   const loc = (char, field) => (I18N.lang === 'zh-HK' && char.zh?.[field]) || char[field];
 
   // ---- Prompt -----------------------------------------------------------------
   function systemPrompt(char, chat, settings) {
     const ti = tierIndex(chat.affection);
     const userName = (settings.userName || '').trim() || 'the user';
+    const userWho = USER_GENDER[settings.userGender] || '';
     const memories = chat.memories.length ? chat.memories.map((m) => `- ${m}`).join('\n') : '- (nothing yet)';
 
-    return `You are writing an interactive story. You play ${char.name} (and narrate the world around them). The user plays ${userName}.
+    return `You are writing an interactive story. You play ${char.name} (and narrate the world around them). The user plays ${userName}${userWho}.
 
 ## ${char.name}
 Age: ${char.age} (an adult)
@@ -101,7 +103,8 @@ ${memories}
 - scene: ALWAYS IN ENGLISH. A visual description of this exact moment for an illustrator: place, lighting, ${char.name}'s pose, expression and clothing. No dialogue, no names of real people.
 - scene_changed: true if the place, time, outfit or situation changed enough to deserve a new picture.
 - remember: 0-2 short new facts worth remembering long-term (about ${userName}, promises, key events). Empty if none.
-- suggestions: 3 short things ${userName} could say or do next, in different tones (e.g. sweet, bold, playful), written in first person.`;
+- suggestions: 3 short things ${userName} could say or do next, in different tones (e.g. sweet, bold, playful), written in first person.
+- key_moment: a short 2-5 word title ONLY if this reply is a rare, major turning point in the relationship (first date, confession, first kiss, a deep secret revealed, saving each other, a serious promise). Otherwise an empty string. Almost every reply should have an empty string.`;
   }
 
   // Vertex AI "responseSchema" format (uppercase types).
@@ -116,9 +119,10 @@ ${memories}
       scene_changed: { type: 'BOOLEAN' },
       remember: { type: 'ARRAY', items: { type: 'STRING' } },
       suggestions: { type: 'ARRAY', items: { type: 'STRING' } },
+      key_moment: { type: 'STRING' },
     },
-    required: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions'],
-    propertyOrdering: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions'],
+    required: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions', 'key_moment'],
+    propertyOrdering: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions', 'key_moment'],
   };
 
   // Turn the saved chat into the "contents" list the AI expects:
@@ -226,6 +230,7 @@ ${memories}
       sceneChanged: Boolean(obj.scene_changed),
       remember: Array.isArray(obj.remember) ? obj.remember.map(String).filter(Boolean).slice(0, 2) : [],
       suggestions: Array.isArray(obj.suggestions) ? obj.suggestions.map(String).filter(Boolean).slice(0, 3) : [],
+      keyMoment: String(obj.key_moment || '').trim().slice(0, 60),
     };
   }
 
@@ -278,10 +283,15 @@ Upper body, facing the viewer with an expression that fits this personality: ${c
 Softly blurred background that hints at: ${char.scenario}
 Single character, no text, no captions, no watermark, no speech bubbles.`;
 
-  const scenePrompt = (char, scene, hasReference) => `Illustration for an interactive story. ${char.artStyle}.
+  const VIEWER = {
+    man: 'If "the viewer" or the user appears, he is an adult man (seen partly, from behind or over the shoulder, never the focus).',
+    woman: 'If "the viewer" or the user appears, she is an adult woman (seen partly, from behind or over the shoulder, never the focus).',
+  };
+  const scenePrompt = (char, scene, hasReference, userGender) => `Illustration for an interactive story. ${char.artStyle}.
 ${hasReference ? `The reference image shows ${char.name}; keep their face, hair and overall look consistent with it.\n` : ''}${char.name} (adult): ${char.appearance}
 Scene: ${scene}
-All people shown are adults. No text, no captions, no watermark, no speech bubbles.`;
+${VIEWER[userGender] || ''}
+${char.name} is the main subject. All people shown are adults. No text, no captions, no watermark, no speech bubbles.`;
 
   // ---- Video (Veo on Vertex AI) ----------------------------------------------------
   // Starting a video returns an "operation" name; we then ask every few seconds whether it is done.

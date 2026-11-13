@@ -244,3 +244,4 @@ dialog.viewer { width: min(560px, calc(100vw - 16px)); }
 .caption { margin: 0; font-size: 14px; color: var(--muted); }
 a.btn { display: inline-block; text-decoration: none; color: var(--text); background: var(--panel-2); border-radius: 12px; padding: 10px 14px; }
 .banner p { flex: 1; min-width: 200px; }
+.moment-badge { align-self: flex-start; margin-bottom: 6px; font-size: 12.5px; font-weight: 700; color: #ffd27a; background: #3a2a12; border: 1px solid #6b4a1a; padding: 3px 10px; border-radius: 999px; }

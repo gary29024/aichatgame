@@ -11,6 +11,9 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
+  // Cloud storage for chats, galleries, pictures and videos.
+  // Create a bucket with this exact name in Cloudflare (R2 → Create bucket) BEFORE deploying.
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "kindred-data" }],
   // Keep the variables you set in the dashboard when a new version is deployed from GitHub.
   "keep_vars": true,
   "observability": { "enabled": true }

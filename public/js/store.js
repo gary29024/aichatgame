@@ -1,5 +1,9 @@
-// Saves everything (settings, chats, pictures) inside this browser using IndexedDB.
-// Nothing is sent anywhere except the Gemini calls in gemini.js.
+// Where things are saved.
+//
+// - Store.get/set/del/keys: this browser's own storage (IndexedDB). Used for settings
+//   and as a fast local copy of everything.
+// - Store.cloud: your Cloudflare R2 storage, reached through our server (/api/store/...).
+//   This is the master copy, shared by all your devices.
 
 window.Store = (() => {
   const DB_NAME = 'storychat';
@@ -34,7 +38,60 @@ window.Store = (() => {
     });
   }
 
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---- Cloud (our server → Cloudflare R2) ----
+  const cloud = {
+    password: () => '', // set by app.js
+
+    async request(method, key, body, type) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const headers = { authorization: 'Bearer ' + cloud.password() };
+          if (type) headers['content-type'] = type;
+          const res = await fetch('/api/store/' + encodeURIComponent(key), { method, headers, body });
+          if (res.headers.get('x-kindred-server') !== '1') {
+            throw Object.assign(new Error(`storage server not reachable (HTTP ${res.status})`), { fatal: true });
+          }
+          if (res.status === 404 && method === 'GET') return null;
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const err = new Error(data.error?.message || `storage error ${res.status}`);
+            err.fatal = res.status < 500; // don't retry mistakes, only server hiccups
+            throw err;
+          }
+          return res;
+        } catch (e) {
+          if (e.fatal || attempt >= 2) throw e;
+          await sleep(700 * (attempt + 1)); // network hiccup: try again
+        }
+      }
+    },
+    async getJSON(key) {
+      const res = await cloud.request('GET', key);
+      return res ? res.json() : null;
+    },
+    async getText(key) {
+      const res = await cloud.request('GET', key);
+      return res ? res.text() : null;
+    },
+    async getBlob(key) {
+      const res = await cloud.request('GET', key);
+      return res ? res.blob() : null;
+    },
+    async put(key, value) {
+      if (value instanceof Blob) return cloud.request('PUT', key, value, value.type || 'application/octet-stream');
+      if (typeof value === 'string') return cloud.request('PUT', key, value, 'text/plain;charset=utf-8');
+      return cloud.request('PUT', key, JSON.stringify(value), 'application/json');
+    },
+    async del(key) {
+      return cloud.request('DELETE', key);
+    },
+  };
+
+  // ---- This device (IndexedDB) ----
   return {
+    cloud,
     async get(key, fallback = null) {
       try {
         const db = await open();

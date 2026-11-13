@@ -17,6 +17,9 @@
 //   GCP_LOCATION_VIDEO           (optional)          default "us-central1"
 //   AI_GATEWAY_URL               (optional)          full gateway base URL; replaces CF_ACCOUNT_ID + AI_GATEWAY_ID
 //
+// Storage: an R2 bucket bound as "DATA" (see wrangler.jsonc) keeps chats, galleries,
+// pictures and videos, so nothing has to be generated twice and every device sees the same data.
+//
 // Request bodies are streamed straight through without being read, so big pictures
 // cost almost no Worker CPU time.
 
@@ -24,6 +27,8 @@ const MODEL_RE = /^[a-z0-9][a-z0-9.\-]{1,80}$/;
 const LOCATION_RE = /^[a-z0-9\-]{2,40}$/;
 const OPERATION_RE = /^projects\/[\w.\-]+\/locations\/[a-z0-9\-]+\/publishers\/google\/models\/[a-z0-9.\-]+\/operations\/[\w.\-]+$/;
 const MAX_POLL_BODY = 4096;
+const KEY_RE = /^[A-Za-z0-9:_.\-]{1,200}$/;
+const MAX_OBJECT_BYTES = 80 * 1024 * 1024;
 
 export default {
   async fetch(request, env) {
@@ -51,8 +56,13 @@ async function handleApi(request, env, url) {
       ok: true,
       auth: env.GOOGLE_SERVICE_ACCOUNT_JSON ? 'service-account-secret' : 'ai-gateway-provider-key',
       locations: { text: cfg.text, image: cfg.image, video: cfg.video },
+      storage: Boolean(env.DATA),
     });
   }
+
+  // Saved data: GET / PUT / DELETE /api/store/{key}
+  if (parts[1] === 'store') return handleStore(request, env, parts);
+
   if (request.method !== 'POST') return json({ error: { message: 'Method not allowed.' } }, 405);
 
   // POST /api/generate/{text|image}/{model}  (body = Vertex generateContent request)
@@ -87,6 +97,39 @@ async function handleApi(request, env, url) {
 }
 
 // ---------------------------------------------------------------------------------------
+
+async function handleStore(request, env, parts) {
+  if (!env.DATA) return setupError('Cloud storage is not set up: the R2 bucket binding "DATA" is missing (see README).');
+  const key = decodeURIComponent(parts.slice(2).join('/'));
+  if (!KEY_RE.test(key)) return badRequest('Invalid key.');
+
+  if (request.method === 'GET') {
+    const obj = await env.DATA.get(key);
+    if (!obj) return json({ error: { message: 'Not found.' } }, 404);
+    return new Response(obj.body, {
+      headers: {
+        'content-type': obj.httpMetadata?.contentType || 'application/octet-stream',
+        'cache-control': 'no-store',
+        'x-kindred-server': '1',
+      },
+    });
+  }
+  if (request.method === 'PUT') {
+    const length = Number(request.headers.get('content-length') || 0);
+    if (length > MAX_OBJECT_BYTES) return json({ error: { message: 'File too large.' } }, 413);
+    // R2 needs to know the size up front; small bodies without a length are read first.
+    const body = length ? request.body : await request.arrayBuffer();
+    await env.DATA.put(key, body, {
+      httpMetadata: { contentType: request.headers.get('content-type') || 'application/octet-stream' },
+    });
+    return json({ ok: true });
+  }
+  if (request.method === 'DELETE') {
+    await env.DATA.delete(key);
+    return json({ ok: true });
+  }
+  return json({ error: { message: 'Method not allowed.' } }, 405);
+}
 
 function config(env) {
   const loc = (v, d) => (LOCATION_RE.test(v || '') ? v : d);
