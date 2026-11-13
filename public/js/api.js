@@ -261,14 +261,46 @@ ${memories}
       const raw = data.error?.message || `Error ${res.status}`;
       if (data.error?.setup) throw new ApiError(raw, 'setup');
       if (res.status === 404 && model) throw new ApiError(`${t('errModel', { model })} (${raw})`, 'model');
-      if (res.status === 429) throw new ApiError(t('errQuota', { msg: raw }), 'quota');
+      if (res.status === 429) throw new ApiError(t('errBusy'), 'busy');
       throw new ApiError(raw, 'other');
     }
     return data;
   }
 
+  // ---- When Google (or fal) says "busy" ---------------------------------------------
+  // Wait and try again a few times, a little longer each time (Google's advice for error 429).
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const RETRY_DELAYS = [2000, 5000, 10000, 20000];
+  let onBusy = null; // the app shows a small notice while waiting
+  async function withRetry(fn) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e.kind !== 'busy' || attempt >= RETRY_DELAYS.length) throw e;
+        if (attempt === 0 && onBusy) onBusy();
+        await sleep(RETRY_DELAYS[attempt] * (0.75 + Math.random() * 0.5));
+      }
+    }
+  }
+
+  // At most 2 pictures are drawn at the same time; the rest wait their turn.
+  const MAX_PARALLEL_PICTURES = 2;
+  let activePictures = 0;
+  const waitingPictures = [];
+  async function pictureSlot(fn) {
+    if (activePictures >= MAX_PARALLEL_PICTURES) await new Promise((r) => waitingPictures.push(r));
+    activePictures++;
+    try {
+      return await fn();
+    } finally {
+      activePictures--;
+      waitingPictures.shift()?.();
+    }
+  }
+
   async function generate(kind, model, body, settings) {
-    const data = await call(`generate/${kind}/${encodeURIComponent(model)}`, { password: settings.password, body, model });
+    const data = await withRetry(() => call(`generate/${kind}/${encodeURIComponent(model)}`, { password: settings.password, body, model }));
     if (data.promptFeedback?.blockReason) throw new ApiError(t('errBlocked', { reason: data.promptFeedback.blockReason }), 'blocked');
     const cand = data.candidates?.[0];
     if (!cand || !cand.content?.parts?.length) {
@@ -557,6 +589,7 @@ Remember the style: ${style}`;
     if (!res.ok || !/^image\//.test(res.headers.get('content-type') || '')) {
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) throw new ApiError(t('errPassword'), 'auth');
+      if (res.status === 429) throw new ApiError(t('errBusy'), 'busy');
       throw new ApiError(data.error?.message || `fal.ai error ${res.status}`, data.error?.setup ? 'setup' : 'other');
     }
     if (res.headers.get('x-fal-flagged') === '1') throw new ApiError(t('errNoPicture'), 'blocked');
@@ -574,19 +607,19 @@ Remember the style: ${style}`;
     const style = styleFor(story, settings);
     if (settings.imageProvider === 'fal') {
       const scene = `upper body portrait, facing the viewer, ${girl.personality.split('.')[0].toLowerCase()} expression, softly blurred background`;
-      return falImage(sdPrompt(story, [girl], scene, settings), settings);
+      return pictureSlot(() => withRetry(() => falImage(sdPrompt(story, [girl], scene, settings), settings)));
     }
-    return image(portraitPrompt(story, girl, style.text), settings);
+    return pictureSlot(() => image(portraitPrompt(story, girl, style.text), settings));
   }
 
   // girls: the women in the picture; refs: portraits of the first refs.length of them, in the same order.
   async function drawScene(story, girls, scene, refs, settings, ctx = {}) {
     if (settings.imageProvider === 'fal') {
       // One face reference: the main woman. More would blend their faces together.
-      return falImage(sdPrompt(story, girls, scene, settings, ctx), settings, refs[0] || null);
+      return pictureSlot(() => withRetry(() => falImage(sdPrompt(story, girls, scene, settings, ctx), settings, refs[0] || null)));
     }
     const list = /lite/i.test(settings.imageModel) ? refs.slice(0, 1) : refs; // the Lite model takes one reference only
-    return image(scenePrompt(story, girls, scene, list.length, settings.userGender, styleFor(story, settings).text, ctx), settings, list);
+    return pictureSlot(() => image(scenePrompt(story, girls, scene, list.length, settings.userGender, styleFor(story, settings).text, ctx), settings, list));
   }
 
   // ---- Video (Veo on Vertex AI) ----------------------------------------------------
@@ -598,7 +631,7 @@ Remember the style: ${style}`;
     const prompt = `Animate this image from the story "${story.title || story.cast[0].name}". Scene: ${scene || story.scenario}
 Subtle, natural motion: breathing, blinking, hair and clothing moving gently, one small expressive gesture, soft ambient movement in the background, slow cinematic push-in.
 Keep the look of the image exactly (${style}), and keep the people, their clothes and the composition the same. Everyone stays clothed. All people shown are adults. No text or captions.`;
-    const data = await call(`video/start/${encodeURIComponent(settings.videoModel)}`, {
+    const data = await withRetry(() => call(`video/start/${encodeURIComponent(settings.videoModel)}`, {
       password: settings.password,
       model: settings.videoModel,
       body: {
@@ -612,7 +645,7 @@ Keep the look of the image exactly (${style}), and keep the people, their clothe
           generateAudio: settings.videoAudio === 'on',
         },
       },
-    });
+    }));
     if (!data.name) throw new ApiError(data.error?.message || t('errNoVideo'));
     return data.name;
   }
@@ -642,6 +675,9 @@ Keep the look of the image exactly (${style}), and keep the people, their clothe
   }
 
   return {
+    set onBusy(fn) {
+      onBusy = fn;
+    },
     LEVELS,
     POINTS_PER_LEVEL,
     MAX_POINTS,

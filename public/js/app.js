@@ -154,6 +154,7 @@
   // devices) and also kept on this device (faster, and a backup if the upload fails).
   // =====================================================================================
   Store.cloud.password = () => S.settings.password;
+  Api.onBusy = () => toast(t('retrying'));
 
   // Upload to the cloud; if that fails, remember it and try again later.
   async function cloudPut(key, value) {
@@ -1089,7 +1090,7 @@
         try {
           r = await Api.videoPoll(job.model, job.op, S.settings);
         } catch (e) {
-          if (e.kind === 'network') continue; // phone lost signal for a moment
+          if (e.kind === 'network' || e.kind === 'busy') continue; // lost signal, or Google busy: just ask again later
           throw e;
         }
         if (!r.done) continue;
