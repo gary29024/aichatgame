@@ -39,7 +39,7 @@
     ['veo-3.1-generate-001', 'Veo 3.1'],
   ];
   const MAX_MEMORIES = 40;
-  const PICTURE_GAP = 5; // in "scene" mode, draw at least every N replies
+  const PICTURE_GAP = 3; // in "scene" mode, draw at least every N replies even if the AI doesn't ask for one
   const MOMENT_GAP = 4; // at least N replies between two key moments
   const VIDEO_POLL_MS = 8000;
   const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;

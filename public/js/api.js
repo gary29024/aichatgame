@@ -101,7 +101,7 @@ ${memories}
 - affection_change: integer from -10 to 10.
 - affection_reason: a few words from ${char.name}'s point of view (e.g. "liked the honesty").
 - scene: ALWAYS IN ENGLISH. A visual description of this exact moment for an illustrator: place, lighting, ${char.name}'s pose, expression and clothing. No dialogue, no names of real people.
-- scene_changed: true if the place, time, outfit or situation changed enough to deserve a new picture.
+- new_picture: true if this moment is worth a new picture: a new place, time or outfit, a notable action or gesture, a strong emotion or expression, or a romantic, funny or dramatic beat. Aim for roughly one picture every 2-3 replies; false for quiet back-and-forth talk.
 - remember: 0-2 short new facts worth remembering long-term (about ${userName}, promises, key events). Empty if none.
 - suggestions: 3 short things ${userName} could say or do next, in different tones (e.g. sweet, bold, playful), written in first person.
 - key_moment: a short 2-5 word title ONLY if this reply is a rare, major turning point in the relationship (first date, confession, first kiss, a deep secret revealed, saving each other, a serious promise). Otherwise an empty string. Almost every reply should have an empty string.`;
@@ -116,13 +116,13 @@ ${memories}
       affection_change: { type: 'INTEGER' },
       affection_reason: { type: 'STRING' },
       scene: { type: 'STRING' },
-      scene_changed: { type: 'BOOLEAN' },
+      new_picture: { type: 'BOOLEAN' },
       remember: { type: 'ARRAY', items: { type: 'STRING' } },
       suggestions: { type: 'ARRAY', items: { type: 'STRING' } },
       key_moment: { type: 'STRING' },
     },
-    required: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions', 'key_moment'],
-    propertyOrdering: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'scene_changed', 'remember', 'suggestions', 'key_moment'],
+    required: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'new_picture', 'remember', 'suggestions', 'key_moment'],
+    propertyOrdering: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'new_picture', 'remember', 'suggestions', 'key_moment'],
   };
 
   // Turn the saved chat into the "contents" list the AI expects:
@@ -227,7 +227,7 @@ ${memories}
       delta: Math.max(-10, Math.min(10, Math.round(Number(obj.affection_change) || 0))),
       reason: String(obj.affection_reason || '').slice(0, 120),
       scene: String(obj.scene || ''),
-      sceneChanged: Boolean(obj.scene_changed),
+      sceneChanged: Boolean(obj.new_picture ?? obj.scene_changed),
       remember: Array.isArray(obj.remember) ? obj.remember.map(String).filter(Boolean).slice(0, 2) : [],
       suggestions: Array.isArray(obj.suggestions) ? obj.suggestions.map(String).filter(Boolean).slice(0, 3) : [],
       keyMoment: String(obj.key_moment || '').trim().slice(0, 60),
