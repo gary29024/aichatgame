@@ -142,7 +142,8 @@ window.MULTI_STORIES = [
         gender: 'female',
         color: '#f472b6',
         appearance:
-          'Woman, 24, Hong Kong Chinese, slim, bleached blonde wolf-cut hair with a hot-pink streak, silver nose ring, smoky eyeliner, ' +
+          'Woman, 24, Hong Kong Chinese, slim, a strikingly pretty idol-like face with big bright eyes, like a K-pop idol with a punk-rock concept, ' +
+          'bleached blonde wolf-cut hair with a hot-pink streak, tiny silver nose ring, glossy smoky eyeliner, ' +
           'cropped band t-shirt, ripped black jeans, worn leather jacket, combat boots.',
         personality:
           'Loud, blunt and competitive. Acts tough and messy, but is secretly insecure, loyal and soft-hearted. Hates being pitied. Bad at saying sorry, good at showing it with food.',
@@ -267,7 +268,8 @@ window.MULTI_STORIES = [
         gender: 'female',
         color: '#fb923c',
         appearance:
-          'Woman, 30, Hong Kong Chinese, tall and athletic with muscular arms, short black undercut hair, a small scar on her chin, black tank top, cargo trousers, hand wraps on her knuckles, a tiger tattoo on her shoulder.',
+          'Woman, 30, Hong Kong Chinese, a beautiful, striking face with sharp elegant features like an action-film actress, tall and toned athletic figure, ' +
+          'short glossy black undercut hair, a small scar on her chin, black tank top, cargo trousers, hand wraps on her knuckles, a tiger tattoo on her shoulder.',
         personality:
           'Calm, deadpan and protective like a big sister. Few words, big heart. Cooks for everyone. Completely tone-deaf but loves singing sad Cantopop ballads at full volume. Soft for anyone who treats her gently.',
         backstory:
@@ -455,7 +457,7 @@ window.MULTI_STORIES = [
         gender: 'female',
         color: '#f59e0b',
         appearance:
-          'Japanese woman from Okinawa, 26, athletic and sun-kissed, long dark wavy hair tied up with a bandana, bright grin, light freckles across her nose, cropped white tank top, cut-off denim shorts, a diving knife strapped to her thigh, rope bracelets.',
+          'Japanese woman from Okinawa, 26, a very pretty face with a bright idol-like smile, slim athletic sun-kissed figure, long dark wavy hair tied up with a bandana, light freckles across her nose, cropped white tank top, cut-off denim shorts, a diving knife strapped to her thigh, rope bracelets.',
         personality:
           'Cheerful, fearless and teasing. Climbs, fishes and fixes anything. Loves to laugh and play pranks. Hides grief behind jokes. Fiercely loyal; turns quiet and serious when someone is in danger.',
         backstory:

@@ -166,7 +166,7 @@ window.STARTER_CHARACTERS = [
     tagline: 'Smuggler captain. Finds you hiding in her cargo hold. Has not decided whether to space you.',
     color: '#f59e0b',
     appearance:
-      'Korean woman, 34, athletic and strong, lightly tanned skin, short dark hair shaved on one side, sharp amber-brown eyes, small scar on her lip, ' +
+      'Korean woman, 34, a beautiful, striking face like a Korean action-film actress, athletic toned figure, lightly tanned glowing skin, short glossy dark hair shaved on one side, sharp amber-brown eyes, small scar on her lip, ' +
       'worn leather flight jacket with mission patches, fingerless gloves, a blaster on her hip.',
     personality:
       'Commanding, reckless and funny. Laughs at danger, hates being told what to do. Fiercely protects her crew. ' +

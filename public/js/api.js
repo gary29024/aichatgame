@@ -131,7 +131,7 @@ ${memories}
   - text
   Narration and scene description use speaker "Narrator" with kind "act".
 - girls: one entry for each character who is present or affected this turn: name, affection_change (integer from -10 to 10), reason (a few words from her point of view, e.g. "liked the honesty"), mood (1-3 words).
-- scene: ALWAYS IN ENGLISH. A picture of exactly the moment this reply ends on, so the picture matches the text: the same place, time of day and lighting, who is there, what each person is doing, their poses and expressions, and what each is wearing (everyone is always clothed; lingerie or sleepwear is fine for intimate moments, never nudity). Show the women looking their most beautiful. Concrete visual details only; no dialogue, no names of real people.
+- scene: ALWAYS IN ENGLISH. A picture of exactly the moment this reply ends on, so the picture matches the text: the same place, time of day and lighting, who is there, what each person is doing, their poses and expressions, and what each is wearing (everyone is always clothed; lingerie or sleepwear is fine for intimate moments, never nudity). Show the women looking their most beautiful, with attractive expressions (even when moody: cool or pouty, never sullen). Concrete visual details only; no dialogue, no names of real people.
 - in_picture: the names of the characters visible in that picture.
 - location: ALWAYS IN ENGLISH. Where the story is now, in a few words (e.g. "Jade's bar, 2 a.m., heavy rain").
 - outfits: ALWAYS IN ENGLISH. For each character present, what she is wearing right now. Keep outfits the same as before unless the story changes them.
@@ -448,19 +448,21 @@ ${memories}
   // One fixed style for every picture keeps the women looking the same from picture to picture.
   const STYLE_PRESETS = {
     photo:
-      'Photorealistic cinematic photograph, like a still from a live-action film: real camera, 50mm lens, natural skin texture, ' +
-      'realistic lighting and shadows, shallow depth of field, subtle film grain. NOT an illustration, NOT a painting, NOT anime, NOT a 3D render.',
+      'Glamorous high-end photograph, like a still from a Korean or Japanese drama or a magazine cover shoot: professional makeup and hair styling, ' +
+      'soft flattering beauty lighting, smooth luminous skin, shallow depth of field, rich cinematic colour. Photorealistic. ' +
+      'NOT an illustration, NOT a painting, NOT anime, NOT a 3D render.',
     painting:
       'Semi-realistic digital painting with soft visible brushwork and painterly lighting. NOT a photograph, NOT anime, NOT a 3D render.',
     anime: 'High-quality anime illustration with clean line art, cel shading and vibrant colours. NOT a photograph, NOT a painting, NOT a 3D render.',
   };
   // Every woman is drawn as very beautiful, in every picture.
   const BEAUTY =
-    'Every woman shown is strikingly beautiful in the style of Hong Kong, Japanese and Korean film stars and idols: ' +
-    'a delicate, harmonious face, clear luminous skin, bright expressive eyes, glossy hair, a slim, elegant and attractive figure, ' +
-    'and soft natural makeup. Flattering light and angles. ' +
-    'Keep any distinctive features from her description (scars, tattoos, freckles); they only add to her beauty.';
-  const LOOK_VERSION = 'b3'; // bump to redraw every portrait once when the look instructions change
+    'MOST IMPORTANT: every woman shown is stunningly beautiful, like a top Hong Kong, Japanese or Korean actress or idol: ' +
+    'a delicate, harmonious, idol-like face, big bright eyes, clear luminous skin, glossy hair, a slim, elegant and attractive figure, ' +
+    'and flattering professional makeup. Flattering light and camera angles. ' +
+    'Her expression is always attractive: even an angry, bored or moody moment looks cool, pouty or alluring, never sullen, tired or plain. ' +
+    'Keep distinctive features from her description (hair colour, scars, tattoos, piercings, freckles); they only add to her beauty.';
+  const LOOK_VERSION = 'b4'; // bump to redraw every portrait once when the look instructions change
 
   // Returns { key, text }: key changes whenever the look changes (used to know when a portrait must be redrawn).
   function styleFor(story, settings) {
@@ -470,11 +472,12 @@ ${memories}
     return { key: maker + 'c:' + story.artStyle, text: `${story.artStyle}. Use this exact art style and medium consistently.` };
   }
 
-  const portraitPrompt = (story, girl, style) => `STYLE: ${style}
+  const portraitPrompt = (story, girl, style) => `${BEAUTY}
+
+STYLE: ${style}
 
 Character portrait for an interactive story.
 ${girl.name}, an adult woman (${girl.age}). ${girl.appearance}
-${BEAUTY}
 Upper body, facing the viewer with an expression that fits this personality: ${girl.personality.split('.')[0]}.
 Softly blurred background that hints at: ${story.scenario}
 Single character, no text, no captions, no watermark, no speech bubbles.
@@ -500,13 +503,15 @@ Remember the style: ${style}`;
         return `${g.name} (adult woman): ${g.appearance}${outfit ? `\nRight now ${g.name} is wearing: ${outfit} (this replaces the clothes described above).` : ''}`;
       })
       .join('\n');
-    return `STYLE: ${style}
+    return `${BEAUTY}
+
+STYLE: ${style}
 
 A new picture for an interactive story. It must show exactly this moment of the story.
 ${refText}${who}
 Scene: ${scene}${ctx.location ? `\nPlace: ${ctx.location}` : ''}${ctx.text ? `\nWhat is happening in the story right now (for context): ${String(ctx.text).slice(0, 700)}` : ''}
 ${VIEWER[userGender] || ''}
-${BEAUTY}
+Remember: every woman is stunningly beautiful with an attractive expression.
 Everyone is clothed. Lingerie or sleepwear is fine for intimate moments; no nudity.
 ${girls.length > 1 ? `${girls.map((g) => g.name).join(' and ')} are the main subjects.` : `${girls[0].name} is the main subject.`} All people shown are adults. No text, no captions, no watermark, no speech bubbles.
 Remember the style: ${style}`;
@@ -522,7 +527,7 @@ Remember the style: ${style}`;
   const falModelOf = (settings) =>
     settings.falModel === 'custom' ? String(settings.falCustomModel || '').trim() || FAL_MODELS.dreamshaper : FAL_MODELS[settings.falModel] || FAL_MODELS.dreamshaper;
   const SD_STYLE = {
-    photo: 'photorealistic, cinematic film still, 35mm photograph, natural skin texture, soft natural light',
+    photo: 'glamour photography, korean drama still, magazine cover, professional makeup, soft beauty lighting, luminous skin, photorealistic',
     painting: 'semi-realistic digital painting, soft brushwork, painterly lighting',
     anime: 'anime illustration, clean lineart, cel shading, vibrant colors',
   };
@@ -530,7 +535,7 @@ Remember the style: ${style}`;
   const SD_NEGATIVE =
     'nude, naked, nipples, topless, nsfw, explicit, sex, genitals, child, kid, teen, underage, loli, ' +
     'lowres, worst quality, low quality, bad anatomy, bad hands, extra fingers, missing fingers, deformed face, blurry, text, watermark, signature, logo, ' +
-    'ugly, plain, unattractive, asymmetrical face, bad skin, old, aged';
+    'ugly, plain, unattractive, asymmetrical face, bad skin, old, aged, tired, sullen, frumpy, harsh lighting';
   const SD_VIEWER = { man: 'the viewer is an adult man, seen from behind or partly out of frame', woman: 'the viewer is an adult woman, seen from behind or partly out of frame' };
 
   function sdPrompt(story, girls, scene, settings, ctx = {}) {
@@ -542,8 +547,8 @@ Remember the style: ${style}`;
       .join(' | ');
     const viewer = /viewer/i.test(scene) ? SD_VIEWER[settings.userGender] || '' : '';
     const beauty =
-      'very beautiful east asian woman, looks like a hong kong actress, japanese actress or korean idol, delicate face, clear luminous skin, ' +
-      'bright expressive eyes, glossy hair, slim attractive figure, soft natural makeup, flattering light';
+      'stunningly beautiful east asian woman, idol-like face, looks like a hong kong actress, japanese actress or korean idol, delicate face, big bright eyes, ' +
+      'clear luminous skin, glossy hair, slim attractive figure, flattering makeup, attractive expression, flattering light';
     return [style, count, beauty, who, scene, ctx.location, viewer, 'masterpiece, best quality, highly detailed, beautiful detailed eyes'].filter(Boolean).join(', ');
   }
 

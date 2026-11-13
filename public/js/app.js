@@ -1203,6 +1203,7 @@
       ${caption ? `<p class="caption">${esc(caption)}</p>` : ''}
       <div class="actions">
         ${animateBtn}
+        ${view.redraw ? `<button type="button" data-act="redraw-view">${esc(t('redraw'))}</button>` : ''}
         <a class="btn" id="viewer-download">${esc(t('download'))}</a>
         ${deletable ? `<button type="button" class="danger" data-act="remove-item">${esc(t('remove'))}</button>` : ''}
         <button type="button" data-act="close">${esc(t('close'))}</button>
@@ -1225,6 +1226,69 @@
       dl.href = iurl;
       dl.download = `${base}-${imageId}.png`;
     }
+  }
+
+  // ---------- Redrawing a picture you don't like ----------
+  async function forgetPicture(story, oldId) {
+    const g = await getGallery(story.id);
+    g.items = g.items.filter((it) => it.id !== oldId);
+    for (const mo of g.moments) if (mo.image === oldId) mo.image = null;
+    for (const k of Object.keys(g.unlocked)) if (g.unlocked[k].image === oldId) g.unlocked[k] = { ...g.unlocked[k], image: null };
+    await saveGallery(story, g);
+    const chat = await loadChat(story);
+    if (chat) {
+      let changed = false;
+      for (const m of chat.messages) {
+        if (imgIdOf(m) === oldId) {
+          m.image = null;
+          changed = true;
+        }
+      }
+      if (changed) await saveChat(story, chat);
+    }
+    if (oldId) await deleteMedia(oldId);
+    return g;
+  }
+
+  async function redrawMessagePicture(story, chat, msg) {
+    closeModal();
+    const g = await forgetPicture(story, imgIdOf(msg));
+    const mo = msg.momentId && g.moments.find((x) => x.id === msg.momentId);
+    if (mo) drawMoment(story, mo, chat, msg);
+    else drawScene(story, chat, msg);
+  }
+
+  async function redrawMilestone(story, x) {
+    closeModal();
+    const g = await getGallery(story.id);
+    await forgetPicture(story, g.unlocked[x.key]?.image);
+    drawMilestone(story, x);
+  }
+
+  async function redrawMoment(story, mo) {
+    closeModal();
+    await forgetPicture(story, mo.image);
+    const chat = await loadChat(story);
+    const msg = chat?.messages.find((m) => m.momentId === mo.id) || null;
+    drawMoment(story, mo, msg ? chat : null, msg);
+  }
+
+  async function redrawItem(story, it) {
+    const chat = await loadChat(story);
+    const msg = chat?.messages.find((m) => imgIdOf(m) === it.id);
+    if (msg) return redrawMessagePicture(story, chat, msg);
+    closeModal();
+    await forgetPicture(story, it.id);
+    toast(t('drawing'));
+    try {
+      const id = await drawPicture(story, it.inPicture, it.scene || story.scenario);
+      const g = await getGallery(story.id);
+      g.items.push({ ...it, id, at: Date.now() });
+      await saveGallery(story, g);
+    } catch (e) {
+      toast(t('pictureFailed', { msg: e.message }), 'error');
+    }
+    refreshViews(story);
   }
 
   function refreshViewer(imageId) {
@@ -1685,7 +1749,9 @@
       else if (act === 'animate' && m) animate(imgIdOf(m), story, m.scene);
       else if (act === 'reroll') reroll(el.dataset.id);
       else if (act === 'retry') retry(el.dataset.id);
-      else if (act === 'view' && m) openViewer({ story, imageId: imgIdOf(m), caption: m.momentTitle || '', scene: m.scene, deletable: false });
+      else if (act === 'view' && m) {
+        openViewer({ story, imageId: imgIdOf(m), caption: m.momentTitle || '', scene: m.scene, deletable: false, redraw: () => redrawMessagePicture(story, chat, m) });
+      }
     });
 
     $('#gallery-body').addEventListener('click', async (e) => {
@@ -1698,13 +1764,13 @@
       const mo = g.moments.find((y) => y.id === el.dataset.id);
       if (act === 'draw-ms' && x) drawMilestone(story, x);
       else if (act === 'view-ms' && x) {
-        openViewer({ story, imageId: g.unlocked[x.key].image, caption: msTitle(x.m), scene: x.m.scene, deletable: false });
+        openViewer({ story, imageId: g.unlocked[x.key].image, caption: msTitle(x.m), scene: x.m.scene, deletable: false, redraw: () => redrawMilestone(story, x) });
       } else if (act === 'draw-moment' && mo) drawMoment(story, mo);
       else if (act === 'view-moment' && mo) {
-        openViewer({ story, imageId: mo.image, caption: `✨ ${mo.title}`, scene: mo.scene, deletable: false });
+        openViewer({ story, imageId: mo.image, caption: `✨ ${mo.title}`, scene: mo.scene, deletable: false, redraw: () => redrawMoment(story, mo) });
       } else if (act === 'view-item') {
         const it = g.items.find((y) => y.id === el.dataset.id);
-        if (it) openViewer({ story, imageId: it.id, caption: it.caption, scene: it.scene, deletable: true });
+        if (it) openViewer({ story, imageId: it.id, caption: it.caption, scene: it.scene, deletable: true, redraw: () => redrawItem(story, it) });
       }
     });
 
@@ -1726,6 +1792,7 @@
       else if (act === 'restore-char') restoreCharacter(S.story);
       else if (act === 'animate-view' && S.viewer) animate(S.viewer.imageId, S.viewer.story, S.viewer.scene);
       else if (act === 'remove-item' && S.viewer) removeGalleryItem(S.viewer);
+      else if (act === 'redraw-view' && S.viewer?.redraw) S.viewer.redraw();
       else if (act === 'new-portrait') {
         closeModal();
         toast(t('newPortrait'));
