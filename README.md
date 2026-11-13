@@ -6,14 +6,18 @@ It runs on **Cloudflare**. The AI requests go through **Cloudflare AI Gateway** 
 
 ## What's in it
 
-- **6 starter characters, all adult women:** Seraphine (fantasy sorceress), Vivienne (jewel thief), Jade (Hong Kong bar owner), Isolde (smuggler captain), Kohaku (fox spirit) and Mina (pop star). You can also **create your own** or edit them. By default you play as a man (changeable in Settings).
+- **11 stories, all with adult women:**
+  - *One-on-one:* Seraphine (fantasy sorceress), Vivienne (jewel thief), Jade (Hong Kong bar owner), Isolde (smuggler captain), Kohaku (fox spirit), Mina (pop star).
+  - *With 2–3 women at once:* Spirit Bureau (Hong Kong ghost office), Double-Booked Flat (rival flatmates), Starlight Karaoke (save a Mong Kok karaoke bar), Beneath the Palace Walls (ancient palace), Castaways of Coral Bay (desert island). Each woman has her own affection bar, portrait and special scenes, and they react to each other.
+  - You can also **create your own** one-on-one characters or edit them. By default you play as a man (changeable in Settings).
+- **💭 Private thoughts.** Some replies show what a woman is secretly thinking. You can read it; your character can't hear it.
 - **English or Traditional Chinese.** In Chinese mode, menus are in Chinese and characters talk in **Hong Kong Cantonese (廣東話)**.
 - **Affection meter**, from *Cold / 冷淡* to *Devoted / 死心塌地*. Characters act differently at each level. Every reply shows its effect, e.g. `+3 ♥ liked the honesty`.
 - **Pictures.** The app draws the character's portrait first and uses it as a reference, so later scene pictures look like the same person.
 - **Motion effect.** Pictures gently drift and shimmer, like a "live photo". It is free and can be turned off in Settings.
 - **Videos.** Tap **🎬 Animate** on any picture to make a short real video of it with Google's Veo.
 - **Gallery (🖼️)**:
-  - *Special memories*: eight scenes per character, locked 🔒 until affection reaches 20, 30, 40, 50, 60, 70, 85 and 100. Once unlocked they stay unlocked, even if you restart the story.
+  - *Special memories*: scenes locked 🔒 until affection rises. One-on-one stories have eight (at 20, 30, 40, 50, 60, 70, 85, 100); group stories have four per woman (at 25, 50, 75, 100). Once unlocked they stay unlocked, even if you restart the story.
   - *Key moments*: when something big happens in your story (first date, confession, first kiss…), the AI turns it into a new card with its own picture. There is no limit.
   - *Story moments*: every picture and video from your chats.
 - **Memory.** The AI notes important facts as you play (⋯ menu → memories).
@@ -116,7 +120,8 @@ Cloudflare's free plan is enough for personal use.
 |---|---|
 | `public/index.html` | The page skeleton: home, chat and gallery screens, plus the pop-up window. |
 | `public/style.css` | The look: dark theme, chat bubbles, cards, affection bar, gallery, motion effect. |
-| `public/js/characters.js` | The starter characters: English description, Cantonese text, and their 8 special scenes. |
+| `public/js/characters.js` | The one-on-one characters: English description, Cantonese text, and their 8 special scenes. |
+| `public/js/stories.js` | The group stories: the women in each, their opening scene as lines, Cantonese text, and 4 special scenes per woman. |
 | `public/js/i18n.js` | Every word on screen in English and Chinese. |
 | `public/js/api.js` | Writes the instructions for the AI (character, affection level, memories, language rules) and sends requests to our server. |
 | `public/js/app.js` | Runs the app: buttons, messages, affection, unlocking scenes, pictures, videos, gallery, settings. |

@@ -1,4 +1,8 @@
 // The app itself: screens, buttons, sending messages, affection, pictures, videos and the gallery.
+//
+// Every story has a "cast" of one or more women. Each woman has her own affection,
+// portrait and special scenes. Older one-woman characters are turned into stories
+// with a cast of one (see toStory).
 (() => {
   'use strict';
   const t = (...a) => I18N.t(...a);
@@ -37,6 +41,7 @@
   const VIDEO_MODELS = [
     ['veo-3.1-fast-generate-001', 'Veo 3.1 Fast'],
     ['veo-3.1-generate-001', 'Veo 3.1'],
+    ['veo-3.1-lite-generate-001', 'Veo 3.1 Lite'],
   ];
   const MAX_MEMORIES = 40;
   const PICTURE_GAP = 3; // in "scene" mode, draw at least every N replies even if the AI doesn't ask for one
@@ -51,19 +56,19 @@
     ready: false, // connected to cloud storage
     index: emptyIndex(), // small summary saved in the cloud (affection, unlocks, portraits, videos)
     custom: {}, // characters you created or edited
-    characters: [],
-    portraits: {}, // character id -> picture (data URL)
-    chats: new Map(), // character id -> chat
-    galleries: new Map(), // character id -> gallery
+    stories: [],
+    portraits: {}, // woman id -> picture (data URL)
+    chats: new Map(), // story id -> chat
+    galleries: new Map(), // story id -> gallery
     images: new Map(), // picture id -> data URL
     videoUrls: new Map(), // picture id -> playable video URL
     videoJobs: {}, // picture id -> video being made
     view: 'home',
-    char: null,
+    story: null,
     chat: null,
     viewer: null, // what the picture viewer is showing
     banner: null, // home screen notice
-    busy: new Set(), // character ids waiting for a reply
+    busy: new Set(), // story ids waiting for a reply
     drawing: new Set(), // things being drawn
     animating: new Set(), // pictures being turned into videos
     portraitJobs: new Map(),
@@ -82,19 +87,41 @@
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const safeColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#8b5cf6');
-  const firstName = (char) => char.name.replace(/^(Captain|Lord|Lady|Dr\.?|Sir)\s+/i, '').split(' ')[0];
   const loc = Api.loc;
   const plain = (text) => String(text || '').replace(/\*+/g, '').replace(/\s+/g, ' ').trim();
   const imgIdOf = (m) => (m.image === true ? m.id : m.image || null); // older saves used `true`
+  const zh = () => I18N.lang === 'zh-HK';
+
+  // Story & cast helpers
+  const isMulti = (story) => story.cast.length > 1;
+  const girlById = (story, id) => story.cast.find((g) => g.id === id) || null;
+  const titleOf = (story) => Api.storyTitle(story);
+  const shortName = (g) => (zh() && g.zh?.name) || g.name.replace(/^(Captain|Lord|Lady|Dr\.?|Sir|Princess)\s+/i, '').split(' ')[0];
+  const girlColor = (story, g) => safeColor(g.color || story.color);
 
   // Turns *actions* into italics and keeps everything else as plain text (safe from code injection).
+  function inlineFormat(text) {
+    return esc(text)
+      .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*\n]+?)\*/g, '<em class="act">$1</em>');
+  }
   function formatText(text) {
-    let h = esc(text);
-    h = h.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
-    h = h.replace(/\*([^*\n]+?)\*/g, '<em class="act">$1</em>');
-    return h
+    return inlineFormat(text)
       .split(/\n{2,}/)
       .map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+      .join('');
+  }
+  // A reply made of lines: narration, someone speaking, or someone's private thought.
+  function renderLines(story, lines) {
+    const sep = zh() ? '：' : ': ';
+    return lines
+      .map((l) => {
+        const g = girlById(story, l.who);
+        if (!g || l.kind === 'act') return `<p class="line act">${inlineFormat(l.text)}</p>`;
+        const who = `<b class="who" style="color:${girlColor(story, g)}">${esc(shortName(g))}</b>${sep}`;
+        if (l.kind === 'think') return `<p class="line think">${who}💭 ${esc(zh() ? `『${l.text}』` : `(${l.text})`)}</p>`;
+        return `<p class="line say">${who}${esc(zh() ? `「${l.text}」` : `“${l.text}”`)}</p>`;
+      })
       .join('');
   }
 
@@ -191,9 +218,41 @@
   const saveJobs = () => putDoc('jobs', S.videoJobs);
   const saveSettings = () => Store.set('settings', S.settings); // settings stay on this device
 
-  async function saveChat(id, chat) {
-    S.index.progress[id] = chat.affection;
-    await Promise.all([putDoc('chat:' + id, chat), saveIndex()]);
+  // Affection per woman, as saved in the summary (older saves stored a single number).
+  function progressOf(story) {
+    const p = S.index.progress[story.id];
+    if (p == null) return null;
+    return typeof p === 'number' ? { [story.cast[0].id]: p } : p;
+  }
+
+  async function saveChat(story, chat) {
+    S.index.progress[story.id] = { ...chat.aff };
+    await Promise.all([putDoc('chat:' + story.id, chat), saveIndex()]);
+  }
+
+  // Older chats had one affection number; now each woman has her own.
+  function normalizeChat(story, chat) {
+    if (!chat.aff) {
+      const g0 = story.cast[0];
+      chat.aff = { [g0.id]: typeof chat.affection === 'number' ? chat.affection : clamp(Number(g0.startAffection) || 15, 0, 100) };
+      chat.moods = { [g0.id]: chat.mood || '' };
+      delete chat.affection;
+      delete chat.mood;
+    }
+    chat.moods = chat.moods || {};
+    for (const g of story.cast) {
+      if (typeof chat.aff[g.id] !== 'number') chat.aff[g.id] = clamp(Math.round(Number(g.startAffection) || 15), 0, 100);
+    }
+    chat.memories = chat.memories || [];
+    chat.suggestions = chat.suggestions || [];
+    return chat;
+  }
+
+  async function loadChat(story) {
+    if (S.chats.has(story.id)) return S.chats.get(story.id);
+    const chat = await getDoc('chat:' + story.id, null);
+    if (chat) S.chats.set(story.id, normalizeChat(story, chat));
+    return S.chats.get(story.id) || null;
   }
 
   const normalizeGallery = (g) => ({ items: g?.items || [], unlocked: g?.unlocked || {}, moments: g?.moments || [] });
@@ -201,9 +260,9 @@
     if (!S.galleries.has(id)) S.galleries.set(id, normalizeGallery(await getDoc('gallery:' + id, null)));
     return S.galleries.get(id);
   }
-  async function saveGallery(char, g) {
-    S.index.unlocks[char.id] = milestonesOf(char).filter((m) => g.unlocked[m.at]).length;
-    await Promise.all([putDoc('gallery:' + char.id, g), saveIndex()]);
+  async function saveGallery(story, g) {
+    S.index.unlocks[story.id] = allMilestones(story).filter((x) => g.unlocked[x.key]).length;
+    await Promise.all([putDoc('gallery:' + story.id, g), saveIndex()]);
   }
 
   // Pictures and videos never change once made, so this device's copy is used first.
@@ -277,16 +336,18 @@
     try {
       S.index = await loadIndexOrMigrate();
       S.custom = await getDoc('custom', {});
-      rebuildCharacters();
+      rebuildStories();
       S.videoJobs = await getDoc('jobs', {});
       S.galleries.clear();
       S.chats.clear();
       await Promise.all(
-        S.characters.map(async (c) => {
-          const pid = S.index.portraits[c.id];
-          const url = pid && (await getImage(pid));
-          if (url) S.portraits[c.id] = url;
-        }),
+        S.stories.flatMap((s) =>
+          s.cast.map(async (g) => {
+            const pid = S.index.portraits[g.id];
+            const url = pid && (await getImage(pid));
+            if (url) S.portraits[g.id] = url;
+          }),
+        ),
       );
       S.banner = null;
       S.ready = true;
@@ -303,7 +364,9 @@
     const existing = await Store.cloud.getJSON('index');
     if (existing) {
       Store.set('index', existing);
-      return { ...emptyIndex(), ...existing };
+      const merged = { ...emptyIndex(), ...existing };
+      merged.portraitStyles = merged.portraitStyles || {};
+      return merged;
     }
     // First time with cloud storage: move anything saved on this device by the earlier version.
     const index = emptyIndex();
@@ -312,7 +375,7 @@
       toast(t('migrating'));
       S.custom = await Store.get('characters:custom', {});
       await putDoc('custom', S.custom);
-      rebuildCharacters();
+      rebuildStories();
       for (const key of await Store.keys('img:')) await cloudPut(key, await Store.get(key));
       for (const key of await Store.keys('vid:')) {
         const blob = await Store.get(key);
@@ -321,23 +384,24 @@
           index.videos[key.slice(4)] = 1;
         }
       }
-      for (const c of S.characters) {
-        const chat = await Store.get('chat:' + c.id);
+      for (const s of S.stories) {
+        const chat = await Store.get('chat:' + s.id);
         if (chat) {
-          await putDoc('chat:' + c.id, chat);
-          index.progress[c.id] = chat.affection;
+          normalizeChat(s, chat);
+          await putDoc('chat:' + s.id, chat);
+          index.progress[s.id] = { ...chat.aff };
         }
-        const g = await Store.get('gallery:' + c.id);
+        const g = await Store.get('gallery:' + s.id);
         if (g) {
           const ng = normalizeGallery(g);
-          await putDoc('gallery:' + c.id, ng);
-          index.unlocks[c.id] = milestonesOf(c).filter((m) => ng.unlocked[m.at]).length;
+          await putDoc('gallery:' + s.id, ng);
+          index.unlocks[s.id] = Object.keys(ng.unlocked).length;
         }
-        const portrait = await Store.get('portrait:' + c.id);
+        const portrait = await Store.get('portrait:' + s.id);
         if (portrait) {
           const pid = uid();
           await putImage(pid, portrait);
-          index.portraits[c.id] = pid;
+          index.portraits[s.cast[0].id] = pid;
         }
       }
       const jobs = await Store.get('videoJobs');
@@ -349,39 +413,80 @@
     return index;
   }
 
-  function rebuildCharacters() {
-    const starterIds = new Set(STARTER_CHARACTERS.map((c) => c.id));
-    const starters = STARTER_CHARACTERS.map((c) => {
-      const o = S.custom[c.id];
-      return o ? { ...c, ...o, zh: { ...(c.zh || {}), ...(o.zh || {}) }, starter: true, edited: true } : { ...c, starter: true };
-    });
-    const mine = Object.values(S.custom).filter((c) => !starterIds.has(c.id) && !c.removedStarter);
-    S.characters = [...mine, ...starters];
-    if (S.char) S.char = S.characters.find((c) => c.id === S.char.id) || null;
-  }
-
-  const findChar = (id) => S.characters.find((c) => c.id === id);
-
-  function newChat(char) {
+  // One-woman characters (the older format, and the ones you create) become stories with a cast of one.
+  function toStory(c) {
+    if (c.cast?.length) return c;
     return {
-      affection: clamp(Math.round(Number(char.startAffection) || 15), 0, 100),
-      mood: '',
-      memories: [],
-      suggestions: [],
-      messages: [{ id: uid(), role: 'char', text: loc(char, 'greeting'), scene: char.scenario }],
+      ...c,
+      cast: [
+        {
+          id: c.id,
+          name: c.name,
+          age: c.age,
+          gender: c.gender,
+          appearance: c.appearance,
+          personality: c.personality,
+          backstory: c.backstory,
+          speakingStyle: c.speakingStyle,
+          startAffection: c.startAffection,
+          milestones: c.milestones,
+          color: c.color,
+          zh: { name: c.zh?.name, speakingStyle: c.zh?.speakingStyle },
+        },
+      ],
     };
   }
 
-  const milestonesOf = (char) =>
-    (char.milestones?.length ? char.milestones : DEFAULT_MILESTONES).map((m) => ({ ...m, scene: m.scene.replace(/\{name\}/g, char.name) }));
-  const msTitle = (m) => (I18N.lang === 'zh-HK' && m.zh) || m.title;
-  const msKey = (char, at) => `ms:${char.id}:${at}`;
-  const isCurrent = (char, chat) => S.char && S.char.id === char.id && S.chat === chat;
+  function rebuildStories() {
+    const builtIn = [...MULTI_STORIES, ...STARTER_CHARACTERS];
+    const builtInIds = new Set(builtIn.map((c) => c.id));
+    const starters = builtIn.map((c) => {
+      const o = !c.cast && S.custom[c.id];
+      return toStory(o ? { ...c, ...o, zh: { ...(c.zh || {}), ...(o.zh || {}) }, starter: true, edited: true } : { ...c, starter: true });
+    });
+    const mine = Object.values(S.custom)
+      .filter((c) => !builtInIds.has(c.id))
+      .map(toStory);
+    S.stories = [...mine, ...starters];
+    if (S.story) S.story = S.stories.find((s) => s.id === S.story.id) || null;
+  }
+
+  const findStory = (id) => S.stories.find((s) => s.id === id);
+
+  function newChat(story) {
+    const aff = {};
+    const moods = {};
+    for (const g of story.cast) {
+      aff[g.id] = clamp(Math.round(Number(g.startAffection) || 15), 0, 100);
+      moods[g.id] = '';
+    }
+    const greeting = loc(story, 'greeting');
+    let first;
+    if (Array.isArray(greeting)) {
+      const lines = greeting.map((l) => ({ ...l }));
+      const inPicture = [...new Set(lines.map((l) => l.who).filter((w) => girlById(story, w)))].slice(0, 3);
+      first = { id: uid(), role: 'char', lines, text: Api.transcript(story, lines), scene: story.scenario, inPicture };
+    } else {
+      first = { id: uid(), role: 'char', text: greeting, scene: story.scenario, inPicture: [story.cast[0].id] };
+    }
+    return { aff, moods, memories: [], suggestions: [], messages: [first] };
+  }
+
+  // Special scenes per woman. Keys stay as plain numbers for one-woman stories (older saves).
+  function milestonesOf(story, girl) {
+    const list = girl.milestones?.length ? girl.milestones : isMulti(story) ? DEFAULT_MILESTONES_MULTI : DEFAULT_MILESTONES;
+    return list.map((m) => ({ ...m, scene: m.scene.replace(/\{name\}/g, girl.name) }));
+  }
+  const msKeyOf = (story, girl, at) => (isMulti(story) ? `${girl.id}:${at}` : String(at));
+  const allMilestones = (story) => story.cast.flatMap((g) => milestonesOf(story, g).map((m) => ({ girl: g, m, key: msKeyOf(story, g, m.at) })));
+  const msTitle = (m) => (zh() && m.zh) || m.title;
+  const msDrawKey = (story, key) => `ms:${story.id}:${key}`;
+
+  const isCurrent = (story, chat) => S.story && S.story.id === story.id && S.chat === chat;
   const picturesOn = () => S.settings.pictureMode !== 'off';
-  const styleOf = (char) => Api.styleFor(char, S.settings);
-  const scenePrompt = (char, scene, hasRef) => Api.scenePrompt(char, scene, hasRef, S.settings.userGender, styleOf(char).text);
+  const styleOf = (story) => Api.styleFor(story, S.settings);
   // The portrait is the reference for every picture, so it must be drawn in the current style.
-  const portraitOk = (char) => Boolean(S.portraits[char.id]) && S.index.portraitStyles[char.id] === styleOf(char).key;
+  const portraitOk = (story, girl) => Boolean(S.portraits[girl.id]) && S.index.portraitStyles[girl.id] === styleOf(story).key;
 
   // ---------- Navigation (uses the address bar so the phone's back button works) ----------
   function route() {
@@ -403,9 +508,9 @@
     if (S.view === 'home') renderHome();
   }
 
-  function refreshViews(char) {
+  function refreshViews(story) {
     if (S.view === 'home') renderHome();
-    else if (S.char && char && S.char.id === char.id) {
+    else if (S.story && story && S.story.id === story.id) {
       if (S.view === 'chat') renderChat();
       if (S.view === 'gallery') renderGallery();
     }
@@ -429,7 +534,7 @@
 
   // ---------- Home screen ----------
   function showHome() {
-    S.char = null;
+    S.story = null;
     S.chat = null;
     showScreen('home');
     renderHome();
@@ -444,22 +549,31 @@
       }`;
     } else banner.hidden = true;
 
-    const cards = S.characters.map((c) => {
-      const p = S.portraits[c.id];
-      const aff = S.index.progress[c.id];
-      const unlocked = S.index.unlocks[c.id] || 0;
-      return `<button class="card" data-id="${esc(c.id)}" style="--c:${safeColor(c.color)}">
-        ${p ? `<img src="${esc(p)}" alt="">` : `<span class="initial">${esc(c.name.trim()[0] || '?')}</span>`}
+    const cards = S.stories.map((s) => {
+      const covers = s.cast.map((g) => S.portraits[g.id]).filter(Boolean).slice(0, 3);
+      const cover = covers.length
+        ? `<span class="cover n${covers.length}">${covers.map((p) => `<img src="${esc(p)}" alt="">`).join('')}</span>`
+        : `<span class="initial">${esc(titleOf(s).trim()[0] || '?')}</span>`;
+      const prog = progressOf(s);
+      const unlocked = S.index.unlocks[s.id] || 0;
+      let progressHtml = '';
+      if (prog) {
+        const values = s.cast.map((g) => prog[g.id] ?? 0);
+        const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+        const label = isMulti(s)
+          ? s.cast.map((g) => `${shortName(g)} ${prog[g.id] ?? 0}`).join(' · ')
+          : `${Api.tierLabel(Api.tierIndex(values[0]))} · ${values[0]}`;
+        progressHtml = `<span class="mini-bar"><span style="width:${avg}%"></span></span>
+          <span class="mini-label">♥ ${esc(label)}${unlocked ? ` · 🔓 ${unlocked}/${allMilestones(s).length}` : ''}</span>`;
+      }
+      return `<button class="card" data-id="${esc(s.id)}" style="--c:${safeColor(s.color)}">
+        ${cover}
+        ${isMulti(s) ? `<span class="cast-badge">👥 ${s.cast.length}</span>` : ''}
         <span class="card-info">
-          <span class="genre">${esc(loc(c, 'genre') || 'Story')}</span>
-          <strong>${esc(c.name)}</strong>
-          <span class="tag">${esc(loc(c, 'tagline') || '')}</span>
-          ${
-            aff !== undefined
-              ? `<span class="mini-bar"><span style="width:${aff}%"></span></span>
-                 <span class="mini-label">♥ ${esc(Api.tierLabel(Api.tierIndex(aff)))} · ${aff}${unlocked ? ` · 🔓 ${unlocked}/${milestonesOf(c).length}` : ''}</span>`
-              : ''
-          }
+          <span class="genre">${esc(loc(s, 'genre') || 'Story')}</span>
+          <strong>${esc(titleOf(s))}</strong>
+          <span class="tag">${esc(loc(s, 'tagline') || '')}</span>
+          ${progressHtml}
         </span>
       </button>`;
     });
@@ -512,43 +626,63 @@
 
   // ---------- Chat screen ----------
   async function openChat(id) {
-    const char = findChar(id);
-    if (!char) return goHome();
+    const story = findStory(id);
+    if (!story) return goHome();
     if (!needReady()) return;
-    let chat = S.chats.get(id) || (await getDoc('chat:' + id, null));
+    let chat = await loadChat(story);
     const fresh = !chat;
     if (fresh) {
-      chat = newChat(char);
-      await saveChat(id, chat);
+      chat = newChat(story);
+      S.chats.set(story.id, chat);
+      await saveChat(story, chat);
     }
-    S.chats.set(id, chat);
-    S.char = char;
+    S.story = story;
     S.chat = chat;
     showScreen('chat');
-    $('#chat').style.setProperty('--c', safeColor(char.color));
+    $('#chat').style.setProperty('--c', safeColor(story.color));
     renderChat(true);
-    if (fresh && picturesOn()) drawScene(char, chat, chat.messages[0]);
-    else if (!portraitOk(char) && picturesOn()) ensurePortrait(char);
-    checkMilestones(char, chat);
+    if (picturesOn()) {
+      if (fresh) drawScene(story, chat, chat.messages[0]);
+      for (const g of story.cast) if (!portraitOk(story, g)) ensurePortrait(story, g);
+    }
+    checkMilestones(story, chat);
   }
 
   function renderChatHeader() {
-    const { char, chat } = S;
-    if (!char || !chat) return;
-    $('#chat-name').textContent = char.name;
-    $('#chat-mood').textContent = chat.mood ? t('feeling', { mood: chat.mood }) : loc(char, 'genre') || '';
+    const { story, chat } = S;
+    if (!story || !chat) return;
+    const multi = isMulti(story);
+    $('#chat-name').textContent = titleOf(story);
+    const g0 = story.cast[0];
+    $('#chat-mood').textContent = !multi && chat.moods[g0.id] ? t('feeling', { mood: chat.moods[g0.id] }) : loc(story, 'genre') || '';
+
     const av = $('#chat-avatar');
-    const p = S.portraits[char.id];
-    av.innerHTML = p ? `<img src="${esc(p)}" alt="">` : esc(char.name.trim()[0] || '?');
-    av.classList.toggle('loading', S.portraitJobs.has(char.id));
-    const a = chat.affection;
-    const next = Api.nextTierMin(a);
-    $('#aff-fill').style.width = a + '%';
-    $('#aff-label').textContent = Api.tierLabel(Api.tierIndex(a));
-    $('#aff-num').textContent = next !== null ? t('nextAt', { a, n: next }) : t('maxed', { a });
+    const pics = story.cast.map((g) => S.portraits[g.id]);
+    av.classList.toggle('stack', multi);
+    av.innerHTML = multi
+      ? story.cast.map((g, i) => (pics[i] ? `<img src="${esc(pics[i])}" alt="">` : `<span style="background:${girlColor(story, g)}">${esc(shortName(g)[0])}</span>`)).join('')
+      : pics[0]
+        ? `<img src="${esc(pics[0])}" alt="">`
+        : esc(titleOf(story).trim()[0] || '?');
+    av.classList.toggle('loading', story.cast.some((g) => S.portraitJobs.has(g.id)));
+
+    $('#affection').innerHTML = story.cast
+      .map((g) => {
+        const a = chat.aff[g.id];
+        const next = Api.nextTierMin(a);
+        const num = multi ? String(a) : next !== null ? t('nextAt', { a, n: next }) : t('maxed', { a });
+        return `<div class="aff-row" data-girl="${esc(g.id)}" style="--gc:${girlColor(story, g)}">
+          ${multi ? `<span class="aff-who">${esc(shortName(g))}</span>` : '<span class="heart">♥</span>'}
+          <div class="bar"><div class="fill" style="width:${a}%"></div></div>
+          <span class="aff-label">${esc(Api.tierLabel(Api.tierIndex(a)))}</span>
+          <span class="aff-num">${esc(num)}</span>
+        </div>`;
+      })
+      .join('');
+    $('#affection').classList.toggle('multi', multi);
   }
 
-  function renderMessage(m, canReroll) {
+  function renderMessage(story, m, canReroll) {
     if (m.role === 'system') {
       return `<div class="msg system"><span>${esc(m.text)}</span>${
         m.retry ? ` <button class="link" data-act="retry" data-id="${m.id}">${esc(t('tryAgain'))}</button>` : ''
@@ -561,10 +695,13 @@
     const badge = m.momentTitle ? `<div class="moment-badge">✨ ${esc(m.momentTitle)}</div>` : '';
     const pic = imageId ? mediaBox(imageId, 'view', `data-msg="${m.id}"`) : drawing ? loadingBox(t('drawing')) : '';
     const tools = [];
-    if (m.delta) {
+    const deltas = m.deltas || (m.delta ? { [story.cast[0].id]: { d: m.delta, reason: m.reason } } : {});
+    for (const [gid, v] of Object.entries(deltas)) {
+      if (!v.d) continue;
+      const g = girlById(story, gid);
       tools.push(
-        `<span class="delta ${m.delta > 0 ? 'up' : 'down'}">${m.delta > 0 ? '+' : ''}${m.delta} ♥${
-          m.reason ? ` <span class="why">${esc(m.reason)}</span>` : ''
+        `<span class="delta ${v.d > 0 ? 'up' : 'down'}">${v.d > 0 ? '+' : ''}${v.d} ♥${isMulti(story) && g ? ` ${esc(shortName(g))}` : ''}${
+          v.reason ? ` <span class="why">${esc(v.reason)}</span>` : ''
         }</span>`,
       );
     }
@@ -577,19 +714,20 @@
       );
     }
     if (canReroll) tools.push(`<button data-act="reroll" data-id="${m.id}">${esc(t('anotherReply'))}</button>`);
-    return `<div class="msg char">${badge}${pic}<div class="bubble">${formatText(m.text)}</div><div class="tools">${tools.join('')}</div></div>`;
+    const body = m.lines?.length ? renderLines(story, m.lines) : formatText(m.text);
+    return `<div class="msg char">${badge}${pic}<div class="bubble">${body}</div><div class="tools">${tools.join('')}</div></div>`;
   }
 
   function renderChat(forceScroll = false) {
-    const { char, chat } = S;
-    if (!char || !chat || S.view !== 'chat') return;
+    const { story, chat } = S;
+    if (!story || !chat || S.view !== 'chat') return;
     renderChatHeader();
     const box = $('#messages');
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 160;
-    const busy = S.busy.has(char.id);
+    const busy = S.busy.has(story.id);
     let lastChar = -1;
     chat.messages.forEach((m, i) => m.role === 'char' && (lastChar = i));
-    const html = chat.messages.map((m, i) => renderMessage(m, !busy && i === lastChar && i > 0)).join('');
+    const html = chat.messages.map((m, i) => renderMessage(story, m, !busy && i === lastChar && i > 0)).join('');
     const typing = busy ? `<div class="msg char"><div class="bubble typing"><span></span><span></span><span></span></div></div>` : '';
     box.innerHTML = html + typing;
     hydrateMedia(box);
@@ -600,39 +738,44 @@
     if (forceScroll || nearBottom) box.scrollTop = box.scrollHeight;
   }
 
-  // ---------- Talking to the character ----------
+  // ---------- Talking to the characters ----------
   async function send(text) {
-    const { char, chat } = S;
+    const { story, chat } = S;
     text = (text || '').trim();
-    if (!text || !char || S.busy.has(char.id)) return;
+    if (!text || !story || S.busy.has(story.id)) return;
     if (!needReady()) return;
     chat.messages = chat.messages.filter((m) => m.role !== 'system');
     chat.messages.push({ id: uid(), role: 'user', text });
     $('#input').value = '';
     autosize();
-    await requestReply(char, chat);
+    await requestReply(story, chat);
   }
 
-  async function requestReply(char, chat) {
-    S.busy.add(char.id);
+  async function requestReply(story, chat) {
+    S.busy.add(story.id);
     chat.suggestions = [];
     if (S.view === 'chat') renderChat(true);
     let result = null;
     try {
-      const r = await Api.chatReply(char, chat, S.settings);
-      const before = chat.affection;
-      chat.affection = clamp(before + r.delta, 0, 100);
+      const r = await Api.chatReply(story, chat, S.settings);
+      const before = { ...chat.aff };
+      const applied = {};
+      for (const [gid, v] of Object.entries(r.deltas)) {
+        chat.aff[gid] = clamp((chat.aff[gid] ?? 0) + v.d, 0, 100);
+        applied[gid] = { d: chat.aff[gid] - before[gid], reason: v.reason };
+      }
       const msg = {
         id: uid(),
         role: 'char',
-        text: r.reply,
+        text: r.text,
+        lines: r.lines,
         scene: r.scene,
-        delta: chat.affection - before,
-        reason: r.reason,
-        prevMood: chat.mood,
+        inPicture: r.inPicture,
+        deltas: applied,
+        prevMoods: { ...chat.moods },
         memAdded: 0,
       };
-      chat.mood = r.mood || chat.mood;
+      Object.assign(chat.moods, r.moods);
       for (const fact of r.remember) {
         if (!chat.memories.some((x) => x.toLowerCase() === fact.toLowerCase())) {
           chat.memories.push(fact);
@@ -643,7 +786,7 @@
       chat.suggestions = r.suggestions;
       let moment = null;
       if (r.keyMoment && momentAllowed(chat)) {
-        moment = { id: uid(), title: r.keyMoment, scene: r.scene, at: Date.now(), image: null };
+        moment = { id: uid(), title: r.keyMoment, scene: r.scene, inPicture: r.inPicture, at: Date.now(), image: null };
         msg.momentTitle = moment.title;
         msg.momentId = moment.id;
       }
@@ -652,17 +795,19 @@
     } catch (e) {
       const settingsProblem = ['auth', 'model', 'setup'].includes(e.kind);
       chat.messages.push({ id: uid(), role: 'system', text: e.message, retry: !settingsProblem || e.kind === 'model' });
-      if (e.kind === 'auth' && isCurrent(char, chat)) openPassword(t('passwordWrong'));
+      if (e.kind === 'auth' && isCurrent(story, chat)) openPassword(t('passwordWrong'));
     } finally {
-      S.busy.delete(char.id);
-      await saveChat(char.id, chat);
-      if (isCurrent(char, chat) && S.view === 'chat') renderChat(true);
+      S.busy.delete(story.id);
+      await saveChat(story, chat);
+      if (isCurrent(story, chat) && S.view === 'chat') renderChat(true);
     }
     if (!result) return;
-    if (isCurrent(char, chat)) announceAffection(char, result.before, chat.affection);
-    if (result.moment) await addMoment(char, chat, result.msg, result.moment);
-    else if (shouldDraw(chat, result.sceneChanged)) drawScene(char, chat, result.msg);
-    checkMilestones(char, chat);
+    if (isCurrent(story, chat)) {
+      for (const g of story.cast) announceAffection(story, g, result.before[g.id], chat.aff[g.id]);
+    }
+    if (result.moment) await addMoment(story, chat, result.msg, result.moment);
+    else if (shouldDraw(chat, result.sceneChanged)) drawScene(story, chat, result.msg);
+    checkMilestones(story, chat);
   }
 
   function shouldDraw(chat, sceneChanged) {
@@ -679,186 +824,202 @@
     return last === -1 || replies.length - last >= MOMENT_GAP;
   }
 
-  function announceAffection(char, before, after) {
-    if (after === before) return;
-    const bar = $('#affection');
-    bar.classList.remove('pulse-up', 'pulse-down');
-    void bar.offsetWidth; // restart the animation
-    bar.classList.add(after > before ? 'pulse-up' : 'pulse-down');
+  function announceAffection(story, girl, before, after) {
+    if (before === undefined || after === before) return;
+    const row = document.querySelector(`.aff-row[data-girl="${CSS.escape(girl.id)}"]`);
+    if (row) {
+      row.classList.remove('pulse-up', 'pulse-down');
+      void row.offsetWidth; // restart the animation
+      row.classList.add(after > before ? 'pulse-up' : 'pulse-down');
+    }
     const i1 = Api.tierIndex(before);
     const i2 = Api.tierIndex(after);
     if (i1 !== i2) {
       const up = i2 > i1;
-      toast(t(up ? 'nowLevelUp' : 'nowLevelDown', { name: firstName(char), level: Api.tierLabel(i2) }), up ? 'good' : 'bad');
+      toast(t(up ? 'nowLevelUp' : 'nowLevelDown', { name: shortName(girl), level: Api.tierLabel(i2) }), up ? 'good' : 'bad');
     }
   }
 
   async function reroll(msgId) {
-    const { char, chat } = S;
-    if (!char || S.busy.has(char.id)) return;
+    const { story, chat } = S;
+    if (!story || S.busy.has(story.id)) return;
     const i = chat.messages.findIndex((m) => m.id === msgId);
     if (i <= 0) return;
     const m = chat.messages[i];
-    chat.affection = clamp(chat.affection - (m.delta || 0), 0, 100);
+    if (m.deltas) {
+      for (const [gid, v] of Object.entries(m.deltas)) chat.aff[gid] = clamp((chat.aff[gid] ?? 0) - (v.d || 0), 0, 100);
+    } else if (m.delta) {
+      const g0 = story.cast[0].id;
+      chat.aff[g0] = clamp(chat.aff[g0] - m.delta, 0, 100);
+    }
     if (m.memAdded) chat.memories.splice(-m.memAdded, m.memAdded);
-    chat.mood = m.prevMood || '';
+    if (m.prevMoods) chat.moods = { ...m.prevMoods };
+    else if ('prevMood' in m) chat.moods[story.cast[0].id] = m.prevMood || '';
     chat.messages.splice(i); // its picture and key moment (if any) stay in the gallery
-    await requestReply(char, chat);
+    await requestReply(story, chat);
   }
 
   async function retry(msgId) {
-    const { char, chat } = S;
-    if (!char || S.busy.has(char.id)) return;
+    const { story, chat } = S;
+    if (!story || S.busy.has(story.id)) return;
     chat.messages = chat.messages.filter((m) => m.id !== msgId);
     if (chat.messages[chat.messages.length - 1]?.role !== 'user') return renderChat();
-    await requestReply(char, chat);
+    await requestReply(story, chat);
   }
 
   // ---------- Pictures ----------
-  function ensurePortrait(char, force = false) {
-    if (!force && portraitOk(char)) return Promise.resolve(S.portraits[char.id]);
-    if (S.portraitJobs.has(char.id)) return S.portraitJobs.get(char.id);
+  function ensurePortrait(story, girl, force = false) {
+    if (!force && portraitOk(story, girl)) return Promise.resolve(S.portraits[girl.id]);
+    if (S.portraitJobs.has(girl.id)) return S.portraitJobs.get(girl.id);
     const job = (async () => {
       try {
-        const style = styleOf(char);
-        const url = await Api.image(Api.portraitPrompt(char, style.text), S.settings);
-        const oldId = S.index.portraits[char.id];
+        const style = styleOf(story);
+        const url = await Api.image(Api.portraitPrompt(story, girl, style.text), S.settings);
+        const oldId = S.index.portraits[girl.id];
         const pid = uid();
         await putImage(pid, url);
-        S.index.portraits[char.id] = pid;
-        S.index.portraitStyles[char.id] = style.key;
-        S.portraits[char.id] = url;
+        S.index.portraits[girl.id] = pid;
+        S.index.portraitStyles[girl.id] = style.key;
+        S.portraits[girl.id] = url;
         await saveIndex();
         if (oldId) deleteMedia(oldId);
         return url;
       } catch (e) {
         toast(t('portraitFailed', { msg: e.message }), 'error');
-        return S.portraits[char.id] || null;
+        return S.portraits[girl.id] || null;
       } finally {
-        S.portraitJobs.delete(char.id);
-        refreshViews(char);
+        S.portraitJobs.delete(girl.id);
+        refreshViews(story);
       }
     })();
-    S.portraitJobs.set(char.id, job);
-    refreshViews(char);
+    S.portraitJobs.set(girl.id, job);
+    refreshViews(story);
     return job;
   }
 
-  // Draws a picture and saves it. Returns the new picture id, or null if it failed.
-  async function drawPicture(char, scene) {
-    const ref = await ensurePortrait(char);
-    const url = await Api.image(scenePrompt(char, scene, Boolean(ref)), S.settings, ref);
+  // Draws a picture of some of the women and saves it. Returns the new picture id.
+  async function drawPicture(story, girlIds, scene) {
+    let girls = (girlIds || []).map((id) => girlById(story, id)).filter(Boolean);
+    if (!girls.length) girls = [story.cast[0]];
+    const refs = await Promise.all(girls.map((g) => ensurePortrait(story, g)));
+    // women with a portrait first, so "reference image N" matches the Nth woman
+    const ordered = girls.map((g, i) => ({ g, r: refs[i] })).sort((a, b) => Number(Boolean(b.r)) - Number(Boolean(a.r)));
+    let refList = ordered.filter((x) => x.r).map((x) => x.r);
+    if (/lite/i.test(S.settings.imageModel)) refList = refList.slice(0, 1); // the Lite model takes one reference only
+    const prompt = Api.scenePrompt(story, ordered.map((x) => x.g), scene, refList.length, S.settings.userGender, styleOf(story).text);
+    const url = await Api.image(prompt, S.settings, refList);
     const id = uid();
     await putImage(id, url);
     return id;
   }
 
-  async function drawScene(char, chat, msg) {
+  async function drawScene(story, chat, msg) {
     if (S.drawing.has(msg.id) || imgIdOf(msg)) return;
     S.drawing.add(msg.id);
-    refreshViews(char);
+    refreshViews(story);
     try {
-      const scene = msg.scene || char.scenario;
-      const id = await drawPicture(char, scene);
-      const g = await getGallery(char.id);
-      g.items.push({ id, at: Date.now(), caption: plain(msg.text).slice(0, 140), scene });
-      await saveGallery(char, g);
+      const scene = msg.scene || story.scenario;
+      const inPicture = msg.inPicture?.length ? msg.inPicture : [story.cast[0].id];
+      const id = await drawPicture(story, inPicture, scene);
+      const g = await getGallery(story.id);
+      g.items.push({ id, at: Date.now(), caption: plain(msg.lines ? msg.lines.map((l) => l.text).join(' ') : msg.text).slice(0, 140), scene, inPicture });
+      await saveGallery(story, g);
       if (chat.messages.includes(msg)) {
         msg.image = id;
-        await saveChat(char.id, chat);
+        await saveChat(story, chat);
       }
     } catch (e) {
       toast(t('pictureFailed', { msg: e.message }), 'error');
       if (e.kind === 'auth') openPassword(t('passwordWrong'));
     } finally {
       S.drawing.delete(msg.id);
-      refreshViews(char);
+      refreshViews(story);
     }
   }
 
   // ---------- Key moments (big turning points the AI spots in your story) ----------
-  async function addMoment(char, chat, msg, moment) {
-    const g = await getGallery(char.id);
+  async function addMoment(story, chat, msg, moment) {
+    const g = await getGallery(story.id);
     g.moments.push(moment);
-    await saveGallery(char, g);
+    await saveGallery(story, g);
     toast(t('newMoment', { title: moment.title }), 'good');
-    if (picturesOn()) drawMoment(char, moment, chat, msg);
+    if (picturesOn()) drawMoment(story, moment, chat, msg);
   }
 
-  async function drawMoment(char, moment, chat = null, msg = null) {
+  async function drawMoment(story, moment, chat = null, msg = null) {
     const key = 'mo:' + moment.id;
     if (S.drawing.has(key)) return;
     S.drawing.add(key);
     if (msg) S.drawing.add(msg.id);
-    refreshViews(char);
+    refreshViews(story);
     try {
-      const id = await drawPicture(char, moment.scene || char.scenario);
-      const g = await getGallery(char.id);
+      const id = await drawPicture(story, moment.inPicture, moment.scene || story.scenario);
+      const g = await getGallery(story.id);
       const stored = g.moments.find((x) => x.id === moment.id);
       if (stored) stored.image = id;
-      await saveGallery(char, g);
+      await saveGallery(story, g);
       if (chat && msg && chat.messages.includes(msg) && !imgIdOf(msg)) {
         msg.image = id;
-        await saveChat(char.id, chat);
+        await saveChat(story, chat);
       }
     } catch (e) {
       toast(t('pictureFailed', { msg: e.message }), 'error');
     } finally {
       S.drawing.delete(key);
       if (msg) S.drawing.delete(msg.id);
-      refreshViews(char);
+      refreshViews(story);
     }
   }
 
-  // ---------- Milestones (special scenes unlocked by affection) ----------
-  async function checkMilestones(char, chat) {
-    const g = await getGallery(char.id);
-    const newly = milestonesOf(char).filter((m) => chat.affection >= m.at && !g.unlocked[m.at]);
+  // ---------- Milestones (special scenes unlocked by each woman's affection) ----------
+  async function checkMilestones(story, chat) {
+    const g = await getGallery(story.id);
+    const newly = allMilestones(story).filter((x) => chat.aff[x.girl.id] >= x.m.at && !g.unlocked[x.key]);
     if (!newly.length) return;
-    for (const m of newly) g.unlocked[m.at] = { at: Date.now(), image: null };
-    await saveGallery(char, g);
-    for (const m of newly) {
-      toast(t('unlocked', { title: msTitle(m) }), 'good');
-      if (picturesOn()) drawMilestone(char, m);
+    for (const x of newly) g.unlocked[x.key] = { at: Date.now(), image: null };
+    await saveGallery(story, g);
+    for (const x of newly) {
+      toast(t('unlocked', { title: msTitle(x.m) }), 'good');
+      if (picturesOn()) drawMilestone(story, x);
     }
-    refreshViews(char);
+    refreshViews(story);
   }
 
-  async function drawMilestone(char, m) {
-    const key = msKey(char, m.at);
+  async function drawMilestone(story, x) {
+    const key = msDrawKey(story, x.key);
     if (S.drawing.has(key)) return;
     S.drawing.add(key);
-    refreshViews(char);
+    refreshViews(story);
     try {
-      const id = await drawPicture(char, m.scene);
-      const g = await getGallery(char.id);
-      g.unlocked[m.at] = { ...(g.unlocked[m.at] || { at: Date.now() }), image: id };
-      await saveGallery(char, g);
+      const id = await drawPicture(story, [x.girl.id], x.m.scene);
+      const g = await getGallery(story.id);
+      g.unlocked[x.key] = { ...(g.unlocked[x.key] || { at: Date.now() }), image: id };
+      await saveGallery(story, g);
     } catch (e) {
       toast(t('pictureFailed', { msg: e.message }), 'error');
     } finally {
       S.drawing.delete(key);
-      refreshViews(char);
+      refreshViews(story);
     }
   }
 
   // ---------- Videos ----------
-  async function animate(imageId, char, scene) {
+  async function animate(imageId, story, scene) {
     if (!imageId || S.animating.has(imageId) || hasVideo(imageId)) return;
     if (!confirm(t('videoConfirm', { n: S.settings.videoSeconds }))) return;
     const img = await getImage(imageId);
     if (!img) return;
     S.animating.add(imageId);
-    refreshViews(char);
+    refreshViews(story);
     refreshViewer(imageId);
     try {
-      const op = await Api.videoStart(char, scene, img, S.settings);
-      S.videoJobs[imageId] = { charId: char.id, model: S.settings.videoModel, op, at: Date.now() };
+      const op = await Api.videoStart(story, scene, img, S.settings);
+      S.videoJobs[imageId] = { charId: story.id, model: S.settings.videoModel, op, at: Date.now() };
       await saveJobs();
     } catch (e) {
       S.animating.delete(imageId);
       toast(t('videoFailed', { msg: e.message }), 'error');
-      refreshViews(char);
+      refreshViews(story);
       refreshViewer(imageId);
       return;
     }
@@ -902,47 +1063,61 @@
     delete S.videoJobs[imageId];
     await saveJobs();
     S.animating.delete(imageId);
-    const char = findChar(job.charId);
-    if (char) refreshViews(char);
+    const story = findStory(job.charId);
+    if (story) refreshViews(story);
     refreshViewer(imageId);
   }
 
   // ---------- Gallery ----------
   async function openGallery(id) {
-    const char = findChar(id);
-    if (!char) return goHome();
+    const story = findStory(id);
+    if (!story) return goHome();
     if (!needReady()) return;
-    S.char = char;
-    S.chat = S.chats.get(id) || (await getDoc('chat:' + id, null));
-    if (S.chat) S.chats.set(id, S.chat);
+    S.story = story;
+    S.chat = await loadChat(story);
     showScreen('gallery');
-    $('#gallery').style.setProperty('--c', safeColor(char.color));
+    $('#gallery').style.setProperty('--c', safeColor(story.color));
     renderGallery();
   }
 
-  async function renderGallery() {
-    const char = S.char;
-    if (!char || S.view !== 'gallery') return;
-    const g = await getGallery(char.id);
-    const ms = milestonesOf(char);
-    const unlockedCount = ms.filter((m) => g.unlocked[m.at]).length;
-    $('#gallery-name').textContent = `${char.name} · ${t('gallery')}`;
-    $('#gallery-count').textContent = t('galleryCount', { n: unlockedCount, total: ms.length, m: g.moments.length });
-    const portrait = S.portraits[char.id];
+  function milestoneTile(story, x, g) {
+    const u = g.unlocked[x.key];
+    const title = `<span class="tile-title">${esc(msTitle(x.m))}</span>`;
+    const data = `data-girl="${esc(x.girl.id)}" data-at="${x.m.at}"`;
+    if (u?.image) return `<div class="tile">${mediaBox(u.image, 'view-ms', data)}${title}</div>`;
+    if (u) {
+      return S.drawing.has(msDrawKey(story, x.key))
+        ? `<div class="tile">${loadingBox(t('drawing'))}${title}</div>`
+        : `<div class="tile"><button class="pic empty" data-act="draw-ms" ${data}>🖼️<br>${esc(t('tapToDraw'))}</button>${title}</div>`;
+    }
+    const portrait = S.portraits[x.girl.id];
+    const tier = Api.tierLabel(Api.tierIndex(x.m.at));
+    return `<div class="tile locked"><div class="pic">${portrait ? `<img class="blur" src="${esc(portrait)}" alt="">` : ''}<span class="lock">🔒</span></div>
+      ${title}<span class="tile-sub">${esc(t('lockedAt', { level: tier, n: x.m.at }))}</span></div>`;
+  }
 
-    const tiles = ms.map((m) => {
-      const u = g.unlocked[m.at];
-      const title = `<span class="tile-title">${esc(msTitle(m))}</span>`;
-      if (u?.image) return `<div class="tile">${mediaBox(u.image, 'view-ms', `data-at="${m.at}"`)}${title}</div>`;
-      if (u) {
-        return S.drawing.has(msKey(char, m.at))
-          ? `<div class="tile">${loadingBox(t('drawing'))}${title}</div>`
-          : `<div class="tile"><button class="pic empty" data-act="draw-ms" data-at="${m.at}">🖼️<br>${esc(t('tapToDraw'))}</button>${title}</div>`;
-      }
-      const tier = Api.tierLabel(Api.tierIndex(m.at));
-      return `<div class="tile locked"><div class="pic">${portrait ? `<img class="blur" src="${esc(portrait)}" alt="">` : ''}<span class="lock">🔒</span></div>
-        ${title}<span class="tile-sub">${esc(t('lockedAt', { level: tier, n: m.at }))}</span></div>`;
-    });
+  async function renderGallery() {
+    const story = S.story;
+    if (!story || S.view !== 'gallery') return;
+    const g = await getGallery(story.id);
+    const all = allMilestones(story);
+    const unlockedCount = all.filter((x) => g.unlocked[x.key]).length;
+    $('#gallery-name').textContent = `${titleOf(story)} · ${t('gallery')}`;
+    $('#gallery-count').textContent = t('galleryCount', { n: unlockedCount, total: all.length, m: g.moments.length });
+
+    let milestonesHtml;
+    if (isMulti(story)) {
+      milestonesHtml = story.cast
+        .map((girl) => {
+          const mine = all.filter((x) => x.girl.id === girl.id);
+          const n = mine.filter((x) => g.unlocked[x.key]).length;
+          return `<h4 style="color:${girlColor(story, girl)}">${esc(shortName(girl))} · ${n}/${mine.length}</h4>
+            <div class="tiles">${mine.map((x) => milestoneTile(story, x, g)).join('')}</div>`;
+        })
+        .join('');
+    } else {
+      milestonesHtml = `<div class="tiles">${all.map((x) => milestoneTile(story, x, g)).join('')}</div>`;
+    }
 
     const moments = [...g.moments].reverse().map((mo) => {
       const title = `<span class="tile-title">✨ ${esc(mo.title)}</span>`;
@@ -953,14 +1128,14 @@
     });
 
     const items = [...g.items].reverse();
-    const story = items.length
-      ? items.map((it) => `<div class="tile">${mediaBox(it.id, 'view-item', `data-id="${esc(it.id)}"`)}</div>`).join('')
+    const storyTiles = items.length
+      ? `<div class="tiles">${items.map((it) => `<div class="tile">${mediaBox(it.id, 'view-item', `data-id="${esc(it.id)}"`)}</div>`).join('')}</div>`
       : `<p class="hint">${esc(t('noStory'))}</p>`;
 
     const body = $('#gallery-body');
-    body.innerHTML = `<h3>${esc(t('milestones'))}</h3><div class="tiles">${tiles.join('')}</div>
+    body.innerHTML = `<h3>${esc(t('milestones'))}</h3>${milestonesHtml}
       <h3>${esc(t('keyMoments'))}</h3>${moments.length ? `<div class="tiles">${moments.join('')}</div>` : `<p class="hint">${esc(t('noMoments'))}</p>`}
-      <h3>${esc(t('story'))}</h3><div class="tiles">${story}</div>`;
+      <h3>${esc(t('story'))}</h3>${storyTiles}`;
     hydrateMedia(body);
   }
 
@@ -990,17 +1165,18 @@
     );
     const holder = $('#viewer-media');
     const dl = $('#viewer-download');
+    const base = titleOf(view.story).replace(/[^\p{L}\p{N}]+/gu, '-');
     if (vurl) {
       holder.replaceChildren(makeVideo(vurl, true));
       dl.href = vurl;
-      dl.download = `${view.char.name}-${imageId}.mp4`;
+      dl.download = `${base}-${imageId}.mp4`;
     } else if (iurl) {
       const img = new Image();
       img.src = iurl;
       img.alt = '';
       holder.replaceChildren(img);
       dl.href = iurl;
-      dl.download = `${view.char.name}-${imageId}.png`;
+      dl.download = `${base}-${imageId}.png`;
     }
   }
 
@@ -1010,11 +1186,11 @@
 
   async function removeGalleryItem(view) {
     if (!confirm(t('removeConfirm'))) return;
-    const { char, imageId } = view;
-    const g = await getGallery(char.id);
+    const { story, imageId } = view;
+    const g = await getGallery(story.id);
     g.items = g.items.filter((it) => it.id !== imageId);
-    await saveGallery(char, g);
-    const chat = S.chats.get(char.id) || (await getDoc('chat:' + char.id, null));
+    await saveGallery(story, g);
+    const chat = await loadChat(story);
     if (chat) {
       let changed = false;
       for (const m of chat.messages) {
@@ -1023,11 +1199,11 @@
           changed = true;
         }
       }
-      if (changed) await saveChat(char.id, chat);
+      if (changed) await saveChat(story, chat);
     }
     await deleteMedia(imageId);
     closeModal();
-    refreshViews(char);
+    refreshViews(story);
   }
 
   // ---------- Pop-up windows ----------
@@ -1189,6 +1365,7 @@
     }
   }
 
+  // ---------- Creating / editing a one-woman character ----------
   const CHAR_FIELDS = [
     ['name', 'input', 'Aria Blackwood'],
     ['age', 'number', ''],
@@ -1209,7 +1386,7 @@
 
   function openEditor(char = null) {
     if (!needReady()) return;
-    const zhMode = I18N.lang === 'zh-HK';
+    const zhMode = zh();
     const c = char || {
       age: 25,
       gender: 'female',
@@ -1280,71 +1457,75 @@
         S.custom[id] = entry;
         await saveCustom();
         if (looksChanged) await forgetPortrait(id);
-        rebuildCharacters();
+        rebuildStories();
         toast(t(char ? 'charUpdated' : 'charCreated'), 'good');
         if (!char) goChat(id);
-        else refreshViews(S.char);
+        else refreshViews(S.story);
       },
     );
   }
 
-  async function forgetPortrait(id) {
-    const pid = S.index.portraits[id];
-    delete S.index.portraits[id];
-    delete S.index.portraitStyles[id];
-    delete S.portraits[id];
+  async function forgetPortrait(girlId) {
+    const pid = S.index.portraits[girlId];
+    delete S.index.portraits[girlId];
+    delete S.index.portraitStyles[girlId];
+    delete S.portraits[girlId];
     await saveIndex();
     if (pid) await deleteMedia(pid);
   }
 
-  async function deleteCharacter(char) {
-    if (!confirm(t('deleteConfirm', { name: char.name }))) return;
-    const id = char.id;
-    const chat = S.chats.get(id) || (await getDoc('chat:' + id, null));
+  async function deleteCharacter(story) {
+    if (!confirm(t('deleteConfirm', { name: titleOf(story) }))) return;
+    const id = story.id;
+    const chat = await loadChat(story);
     const g = await getGallery(id);
     const ids = new Set([
       ...g.items.map((it) => it.id),
       ...g.moments.map((mo) => mo.image),
       ...Object.values(g.unlocked).map((u) => u.image),
-      S.index.portraits[id],
+      ...story.cast.map((girl) => S.index.portraits[girl.id]),
     ]);
     for (const m of chat?.messages || []) ids.add(imgIdOf(m));
     for (const imageId of ids) if (imageId) await deleteMedia(imageId);
     await Promise.all([delDoc('chat:' + id), delDoc('gallery:' + id)]);
     S.chats.delete(id);
     S.galleries.delete(id);
-    delete S.portraits[id];
-    delete S.index.portraits[id];
-    delete S.index.portraitStyles[id];
+    for (const girl of story.cast) {
+      delete S.portraits[girl.id];
+      delete S.index.portraits[girl.id];
+      delete S.index.portraitStyles[girl.id];
+    }
     delete S.index.progress[id];
     delete S.index.unlocks[id];
     await saveIndex();
     delete S.custom[id];
     await saveCustom();
-    rebuildCharacters();
+    rebuildStories();
     closeModal();
     goHome();
   }
 
-  async function restoreCharacter(char) {
+  async function restoreCharacter(story) {
     if (!confirm(t('restoreConfirm'))) return;
-    delete S.custom[char.id];
+    delete S.custom[story.id];
     await saveCustom();
-    await forgetPortrait(char.id);
-    rebuildCharacters();
+    await forgetPortrait(story.cast[0].id);
+    rebuildStories();
     closeModal();
-    refreshViews(S.char);
+    refreshViews(S.story);
   }
 
+  const memoriesName = (story) => (isMulti(story) ? titleOf(story) : shortName(story.cast[0]));
+
   function openMenu() {
-    const { char } = S;
+    const { story } = S;
     openModal(
-      `<h2>${esc(char.name)}</h2>
+      `<h2>${esc(titleOf(story))}</h2>
       <div class="menu">
         <button type="button" data-act="gallery">${esc(t('menuGallery'))}</button>
-        <button type="button" data-act="memories">${esc(t('menuMemories', { name: firstName(char) }))}</button>
+        <button type="button" data-act="memories">${esc(t('menuMemories', { name: memoriesName(story) }))}</button>
         <button type="button" data-act="new-portrait">${esc(t('menuPortrait'))}</button>
-        <button type="button" data-act="edit-char">${esc(t('menuEdit'))}</button>
+        ${isMulti(story) ? '' : `<button type="button" data-act="edit-char">${esc(t('menuEdit'))}</button>`}
         <button type="button" data-act="restart" class="danger">${esc(t('menuRestart'))}</button>
         <button type="button" data-act="close">${esc(t('close'))}</button>
       </div>`,
@@ -1354,9 +1535,9 @@
   }
 
   function openMemories() {
-    const { char, chat } = S;
+    const { story, chat } = S;
     openModal(
-      `<h2>${esc(t('memoriesTitle', { name: firstName(char) }))}</h2>
+      `<h2>${esc(t('memoriesTitle', { name: memoriesName(story) }))}</h2>
       <p class="hint">${esc(t('memoriesHint'))}</p>
       <textarea name="memories" rows="12">${esc(chat.memories.join('\n'))}</textarea>
       <div class="actions"><button type="button" data-act="close">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t('save'))}</button></div>`,
@@ -1366,29 +1547,29 @@
           .map((s) => s.trim())
           .filter(Boolean)
           .slice(-MAX_MEMORIES);
-        await saveChat(char.id, chat);
+        await saveChat(story, chat);
         toast(t('memoriesSaved'), 'good');
       },
     );
   }
 
   async function restartStory() {
-    const { char } = S;
-    if (!confirm(t('restartConfirm', { name: char.name }))) return;
+    const { story } = S;
+    if (!confirm(t('restartConfirm', { name: titleOf(story) }))) return;
     closeModal();
     // Pictures that are in the gallery are kept; anything else from the old chat is removed.
-    const g = await getGallery(char.id);
+    const g = await getGallery(story.id);
     const keep = new Set([...g.items.map((it) => it.id), ...g.moments.map((mo) => mo.image)]);
     for (const m of S.chat.messages) {
       const id = imgIdOf(m);
       if (id && !keep.has(id)) await deleteMedia(id);
     }
-    const chat = newChat(char);
-    S.chats.set(char.id, chat);
+    const chat = newChat(story);
+    S.chats.set(story.id, chat);
     S.chat = chat;
-    await saveChat(char.id, chat);
+    await saveChat(story, chat);
     renderChat(true);
-    if (picturesOn()) drawScene(char, chat, chat.messages[0]);
+    if (picturesOn()) drawScene(story, chat, chat.messages[0]);
   }
 
   // ---------- Wiring up buttons ----------
@@ -1404,8 +1585,8 @@
     $('#btn-settings').addEventListener('click', openSettings);
     $('#key-banner').addEventListener('click', (e) => e.target.closest('[data-act=password]') && openPassword());
     $('#btn-back').addEventListener('click', goHome);
-    $('#btn-gallery').addEventListener('click', () => S.char && goGallery(S.char.id));
-    $('#btn-gallery-back').addEventListener('click', () => S.char && goChat(S.char.id));
+    $('#btn-gallery').addEventListener('click', () => S.story && goGallery(S.story.id));
+    $('#btn-gallery-back').addEventListener('click', () => S.story && goChat(S.story.id));
     $('#btn-menu').addEventListener('click', openMenu);
 
     $('#char-grid').addEventListener('click', (e) => {
@@ -1435,33 +1616,33 @@
     $('#messages').addEventListener('click', (e) => {
       const el = e.target.closest('[data-act]');
       if (!el || !S.chat) return;
-      const { char, chat } = S;
+      const { story, chat } = S;
       const m = chat.messages.find((x) => x.id === (el.dataset.id || el.dataset.msg));
       const act = el.dataset.act;
-      if (act === 'draw' && m) drawScene(char, chat, m);
-      else if (act === 'animate' && m) animate(imgIdOf(m), char, m.scene);
+      if (act === 'draw' && m) drawScene(story, chat, m);
+      else if (act === 'animate' && m) animate(imgIdOf(m), story, m.scene);
       else if (act === 'reroll') reroll(el.dataset.id);
       else if (act === 'retry') retry(el.dataset.id);
-      else if (act === 'view' && m) openViewer({ char, imageId: imgIdOf(m), caption: m.momentTitle || '', scene: m.scene, deletable: false });
+      else if (act === 'view' && m) openViewer({ story, imageId: imgIdOf(m), caption: m.momentTitle || '', scene: m.scene, deletable: false });
     });
 
     $('#gallery-body').addEventListener('click', async (e) => {
       const el = e.target.closest('[data-act]');
-      if (!el || !S.char) return;
-      const char = S.char;
-      const g = await getGallery(char.id);
+      if (!el || !S.story) return;
+      const story = S.story;
+      const g = await getGallery(story.id);
       const act = el.dataset.act;
-      const m = milestonesOf(char).find((x) => String(x.at) === el.dataset.at);
-      const mo = g.moments.find((x) => x.id === el.dataset.id);
-      if (act === 'draw-ms' && m) drawMilestone(char, m);
-      else if (act === 'view-ms' && m) {
-        openViewer({ char, imageId: g.unlocked[m.at].image, caption: msTitle(m), scene: m.scene, deletable: false });
-      } else if (act === 'draw-moment' && mo) drawMoment(char, mo);
+      const x = allMilestones(story).find((y) => y.girl.id === el.dataset.girl && String(y.m.at) === el.dataset.at);
+      const mo = g.moments.find((y) => y.id === el.dataset.id);
+      if (act === 'draw-ms' && x) drawMilestone(story, x);
+      else if (act === 'view-ms' && x) {
+        openViewer({ story, imageId: g.unlocked[x.key].image, caption: msTitle(x.m), scene: x.m.scene, deletable: false });
+      } else if (act === 'draw-moment' && mo) drawMoment(story, mo);
       else if (act === 'view-moment' && mo) {
-        openViewer({ char, imageId: mo.image, caption: `✨ ${mo.title}`, scene: mo.scene, deletable: false });
+        openViewer({ story, imageId: mo.image, caption: `✨ ${mo.title}`, scene: mo.scene, deletable: false });
       } else if (act === 'view-item') {
-        const it = g.items.find((x) => x.id === el.dataset.id);
-        if (it) openViewer({ char, imageId: it.id, caption: it.caption, scene: it.scene, deletable: true });
+        const it = g.items.find((y) => y.id === el.dataset.id);
+        if (it) openViewer({ story, imageId: it.id, caption: it.caption, scene: it.scene, deletable: true });
       }
     });
 
@@ -1475,18 +1656,18 @@
       else if (act === 'test') testConnection($('#modal-form'));
       else if (act === 'gallery') {
         closeModal();
-        goGallery(S.char.id);
+        goGallery(S.story.id);
       } else if (act === 'memories') openMemories();
-      else if (act === 'edit-char') openEditor(S.char);
+      else if (act === 'edit-char') openEditor(S.story);
       else if (act === 'restart') restartStory();
-      else if (act === 'delete-char') deleteCharacter(S.char);
-      else if (act === 'restore-char') restoreCharacter(S.char);
-      else if (act === 'animate-view' && S.viewer) animate(S.viewer.imageId, S.viewer.char, S.viewer.scene);
+      else if (act === 'delete-char') deleteCharacter(S.story);
+      else if (act === 'restore-char') restoreCharacter(S.story);
+      else if (act === 'animate-view' && S.viewer) animate(S.viewer.imageId, S.viewer.story, S.viewer.scene);
       else if (act === 'remove-item' && S.viewer) removeGalleryItem(S.viewer);
       else if (act === 'new-portrait') {
         closeModal();
         toast(t('newPortrait'));
-        ensurePortrait(S.char, true);
+        for (const g of S.story.cast) ensurePortrait(S.story, g, true);
       }
     });
     modal.addEventListener('close', () => {
@@ -1506,7 +1687,7 @@
     S.settings = { ...DEFAULT_SETTINGS, ...(await Store.get('settings', {})) };
     I18N.set(S.settings.language);
     S.custom = (await Store.get('custom')) || {};
-    rebuildCharacters();
+    rebuildStories();
     applyStaticText();
     bindEvents();
     showScreen('home');

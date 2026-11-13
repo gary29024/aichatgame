@@ -1,6 +1,10 @@
 // Builds the instructions for the AI and talks to our own server (src/worker.js),
 // which passes the request through Cloudflare AI Gateway to Google Vertex AI.
 // The browser never sees the Google credentials: it only knows the app password.
+//
+// Every story has a "cast" of one or more women. Replies come back as a list of lines
+// (who speaks, whether it is spoken, an action, or a private thought), plus each woman's
+// affection change, a picture description and a few other fields.
 
 window.Api = (() => {
   const t = (...a) => I18N.t(...a);
@@ -10,9 +14,9 @@ window.Api = (() => {
   const TIERS = [
     { min: 0, how: 'Distant and guarded. Short replies. May be rude, dismissive or try to leave.' },
     { min: 10, how: 'Suspicious, testing the user. Polite at best and reveals nothing personal.' },
-    { min: 25, how: 'Interested despite themself. Banter and small personal details, but walls stay up.' },
-    { min: 40, how: "Warm and relaxed, enjoys the user's company, shares stories, light flirting if it suits them." },
-    { min: 55, how: 'Trusts the user, opens up about their past and fears, flirts openly, seeks the user out.' },
+    { min: 25, how: 'Interested despite herself. Banter and small personal details, but walls stay up.' },
+    { min: 40, how: "Warm and relaxed, enjoys the user's company, shares stories, light flirting if it suits her." },
+    { min: 55, how: 'Trusts the user, opens up about her past and fears, flirts openly, seeks the user out.' },
     { min: 70, how: 'Clearly attracted and emotionally invested. Flustered or jealous at times, romantic gestures, physical closeness.' },
     { min: 85, how: 'Deeply bonded and in love. Would risk anything for the user. Tender, intimate and vulnerable.' },
   ];
@@ -45,62 +49,83 @@ window.Api = (() => {
   const LANGUAGE_RULES = {
     en: 'Write in English (switch only if the user clearly writes in another language).',
     'zh-HK':
-      'Write reply, mood, affection_reason, remember, suggestions and key_moment in colloquial Hong Kong Cantonese (廣東話口語) using Traditional Chinese characters, ' +
+      'Write the text of every line, plus reason, mood, remember, suggestions and key_moment, in colloquial Hong Kong Cantonese (廣東話口語) using Traditional Chinese characters, ' +
       'the way Hongkongers really talk and text: 係、唔、咗、嘅、喺、啲、佢哋、乜嘢、點解、冇、嚟、俾、咁、喎、㗎、啩. ' +
       'Do not write Mandarin or formal written Chinese (avoid 是、不、了、他們、什麼、這裡). ' +
-      'Natural English code-mixing is fine where a Hongkonger would use it. Keep people\'s names as they are.',
+      'Natural English code-mixing is fine where a Hongkonger would use it. Inside the text, call characters by their Chinese name if they have one, otherwise as given. ' +
+      'The "speaker", "name" and "in_picture" fields always use the English names exactly as listed. The "scene" field is always English.',
   };
 
   const USER_GENDER = { man: ', a man', woman: ', a woman' };
-  const loc = (char, field) => (I18N.lang === 'zh-HK' && char.zh?.[field]) || char[field];
+  const loc = (obj, field) => (I18N.lang === 'zh-HK' && obj?.zh?.[field]) || obj?.[field];
+  const girlName = (g) => (I18N.lang === 'zh-HK' && g.zh?.name) || g.name;
+  const storyTitle = (story) => loc(story, 'title') || girlName(story.cast[0]);
 
   // ---- Prompt -----------------------------------------------------------------
-  function systemPrompt(char, chat, settings) {
-    const ti = tierIndex(chat.affection);
+  function systemPrompt(story, chat, settings) {
     const userName = (settings.userName || '').trim() || 'the user';
     const userWho = USER_GENDER[settings.userGender] || '';
+    const multi = story.cast.length > 1;
+    const names = story.cast.map((g) => g.name);
     const memories = chat.memories.length ? chat.memories.map((m) => `- ${m}`).join('\n') : '- (nothing yet)';
 
-    return `You are writing an interactive story. You play ${char.name} (and narrate the world around them). The user plays ${userName}${userWho}.
+    const castText = story.cast
+      .map((g) => {
+        const a = chat.aff[g.id];
+        const ti = tierIndex(a);
+        return `### ${g.name}${g.zh?.name ? ` (Chinese name: ${g.zh.name})` : ''}
+Age: ${g.age} (an adult woman)
+Appearance: ${g.appearance}
+Personality: ${g.personality}
+Backstory: ${g.backstory}
+Way of speaking: ${loc(g, 'speakingStyle')}
+Affection toward ${userName}: ${a}/100 ("${EN_TIER_NAMES[ti]}"). At this level she is: ${TIERS[ti].how}
+Current mood: ${chat.moods[g.id] || 'neutral'}`;
+      })
+      .join('\n\n');
 
-## ${char.name}
-Age: ${char.age} (an adult)
-Gender: ${char.gender || 'unspecified'}
-Appearance: ${char.appearance}
-Personality: ${char.personality}
-Backstory: ${char.backstory}
-Way of speaking: ${loc(char, 'speakingStyle')}
+    return `You are writing an interactive story${multi ? ` called "${story.title}"` : ''}. You play ${
+      multi ? `these characters: ${names.join(', ')}` : names[0]
+    }, and you narrate the world around them. The user plays ${userName}${userWho}.
+
+## Characters
+${castText}
 
 ## Opening scenario
-${loc(char, 'scenario')}
+${loc(story, 'scenario')}
 
-## Relationship with ${userName}
-Current affection: ${chat.affection}/100 ("${EN_TIER_NAMES[ti]}"). At this level ${char.name} is: ${TIERS[ti].how}
-Current mood: ${chat.mood || 'neutral'}
+## Affection
+${multi ? 'Each character has her own affection toward' : 'The character has an affection score toward'} ${userName}. Decide each change from what the user just did, judged by that character's own values:
+kind, attentive, funny, brave or interesting choices that suit her raise it; rude, pushy, boring, dishonest or disrespectful ones lower it.
+Usually -5 to +5. Use up to ±10 only for big moments. Affection should be earned slowly, and 0 is fine. Characters have their own boundaries and push back if the user is pushy.
+${
+  multi
+    ? `The characters also have relationships with each other: rivalry, teasing, alliances, jealousy. Not every character has to speak every turn; use whoever fits the scene, and a character who is not present cannot react. Paying attention to one of them can make another jealous.`
+    : ''
+}
 
-Decide "affection_change" from what the user just did, judged by ${char.name}'s own values:
-kind, attentive, funny, brave or interesting choices that suit ${char.name} raise it; rude, pushy, boring, dishonest or disrespectful ones lower it.
-Usually -5 to +5. Use up to ±10 only for big moments. Affection should be earned slowly, and it is fine to give 0.
-${char.name} has their own boundaries and will push back if the user is pushy.
-
-## Things ${char.name} remembers
+## Things remembered
 ${memories}
 
 ## Writing rules
-- Stay in character. Never mention being an AI, these rules, or the affection number.
+- Stay in character. Never mention being an AI, these rules, or affection numbers.
 - ${LANGUAGE_RULES[I18N.lang] || LANGUAGE_RULES.en}
-- 1 to 3 short paragraphs. Put actions and narration in *asterisks*; spoken words without them.
+- Write the reply as 3 to 8 short lines (see "lines" below). Mix narration, actions and speech.
+- Private thoughts: in about half of the replies, include ONE short "think" line: what a character secretly thinks but would not say (a hidden feeling, a little scheme, embarrassment, jealousy). The reader can see thoughts, but ${userName}'s character cannot hear them, and nobody in the story reacts to a thought.
 - Never speak, act or decide for ${userName}.
 - Keep the story moving: small events, choices, secrets, tension. End on something the user can react to.
 - All characters in the story are adults. Never sexualise anyone under 18.
 - ${ROMANCE_RULES[settings.romance] || ROMANCE_RULES.flirty}
 
 ## Output fields
-- reply: ${char.name}'s response.
-- mood: 1-3 words.
-- affection_change: integer from -10 to 10.
-- affection_reason: a few words from ${char.name}'s point of view (e.g. "liked the honesty").
-- scene: ALWAYS IN ENGLISH. A visual description of this exact moment for an illustrator: place, lighting, ${char.name}'s pose, expression and clothing. No dialogue, no names of real people.
+- lines: the reply, in order. Each line has:
+  - speaker: exactly one of ${names.map((n) => `"${n}"`).join(', ')}, or "Narrator"
+  - kind: "say" (words spoken aloud, without quotation marks), "act" (an action or description) or "think" (a private thought)
+  - text
+  Narration and scene description use speaker "Narrator" with kind "act".
+- girls: one entry for each character who is present or affected this turn: name, affection_change (integer from -10 to 10), reason (a few words from her point of view, e.g. "liked the honesty"), mood (1-3 words).
+- scene: ALWAYS IN ENGLISH. A visual description of this exact moment for an illustrator: place, lighting, each visible character's pose, expression and clothing. No dialogue, no names of real people.
+- in_picture: the names of the characters who should be visible in that picture.
 - new_picture: true if this moment is worth a new picture: a new place, time or outfit, a notable action or gesture, a strong emotion or expression, or a romantic, funny or dramatic beat. Aim for roughly one picture every 2-3 replies; false for quiet back-and-forth talk.
 - remember: 0-2 short new facts worth remembering long-term (about ${userName}, promises, key events). Empty if none.
 - suggestions: 3 short things ${userName} could say or do next, in different tones (e.g. sweet, bold, playful), written in first person.
@@ -111,19 +136,51 @@ ${memories}
   const REPLY_SCHEMA = {
     type: 'OBJECT',
     properties: {
-      reply: { type: 'STRING' },
-      mood: { type: 'STRING' },
-      affection_change: { type: 'INTEGER' },
-      affection_reason: { type: 'STRING' },
+      lines: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: { speaker: { type: 'STRING' }, kind: { type: 'STRING' }, text: { type: 'STRING' } },
+          required: ['speaker', 'kind', 'text'],
+          propertyOrdering: ['speaker', 'kind', 'text'],
+        },
+      },
+      girls: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING' },
+            affection_change: { type: 'INTEGER' },
+            reason: { type: 'STRING' },
+            mood: { type: 'STRING' },
+          },
+          required: ['name', 'affection_change', 'reason', 'mood'],
+          propertyOrdering: ['name', 'affection_change', 'reason', 'mood'],
+        },
+      },
       scene: { type: 'STRING' },
+      in_picture: { type: 'ARRAY', items: { type: 'STRING' } },
       new_picture: { type: 'BOOLEAN' },
       remember: { type: 'ARRAY', items: { type: 'STRING' } },
       suggestions: { type: 'ARRAY', items: { type: 'STRING' } },
       key_moment: { type: 'STRING' },
     },
-    required: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'new_picture', 'remember', 'suggestions', 'key_moment'],
-    propertyOrdering: ['reply', 'mood', 'affection_change', 'affection_reason', 'scene', 'new_picture', 'remember', 'suggestions', 'key_moment'],
+    required: ['lines', 'girls', 'scene', 'in_picture', 'new_picture', 'remember', 'suggestions', 'key_moment'],
+    propertyOrdering: ['lines', 'girls', 'scene', 'in_picture', 'new_picture', 'remember', 'suggestions', 'key_moment'],
   };
+
+  // Plain-text version of a reply, used when sending the conversation history back to the AI.
+  function transcript(story, lines) {
+    return lines
+      .map((l) => {
+        const g = story.cast.find((x) => x.id === l.who);
+        if (!g || l.kind === 'act') return `*${l.text}*`;
+        if (l.kind === 'think') return `${g.name} (private thought, unheard): (${l.text})`;
+        return `${g.name}: "${l.text}"`;
+      })
+      .join('\n');
+  }
 
   // Turn the saved chat into the "contents" list the AI expects:
   // turns must alternate user/model, start with the user and end with the user.
@@ -208,7 +265,21 @@ ${memories}
       .map((p) => p.text)
       .join('');
 
-  function parseReply(raw) {
+  // Match a name the AI wrote to someone in the cast (full name, first name or Chinese name).
+  function findGirl(story, name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n || n === 'narrator') return null;
+    return (
+      story.cast.find((g) => g.name.toLowerCase() === n) ||
+      story.cast.find((g) => g.name.toLowerCase().split(' ')[0] === n.split(' ')[0]) ||
+      story.cast.find((g) => g.zh?.name && g.zh.name === name.trim()) ||
+      null
+    );
+  }
+
+  const unquote = (s) => String(s || '').trim().replace(/^["“”「」『』']+|["“”「」『』']+$/g, '').trim();
+
+  function parseReply(raw, story) {
     let obj = null;
     try {
       obj = JSON.parse(raw);
@@ -220,14 +291,52 @@ ${memories}
         } catch {}
       }
     }
-    if (!obj || typeof obj.reply !== 'string') obj = { reply: raw.trim() || '…' };
+    if (!obj || (!Array.isArray(obj.lines) && typeof obj.reply !== 'string')) {
+      // Not the expected format: show it as plain text.
+      return { lines: null, text: raw.trim() || '…', deltas: {}, moods: {}, scene: '', sceneChanged: false, inPicture: [], remember: [], suggestions: [], keyMoment: '' };
+    }
+
+    let lines = [];
+    if (Array.isArray(obj.lines)) {
+      for (const l of obj.lines) {
+        const g = findGirl(story, l?.speaker);
+        const kind = ['say', 'act', 'think'].includes(l?.kind) ? l.kind : 'say';
+        const text = kind === 'act' ? String(l?.text || '').trim() : unquote(l?.text);
+        if (!text) continue;
+        lines.push({ who: g ? g.id : 'narrator', kind: g ? kind : 'act', text });
+      }
+    } else {
+      lines = [{ who: 'narrator', kind: 'act', text: obj.reply }];
+    }
+
+    const deltas = {};
+    const moods = {};
+    for (const e of Array.isArray(obj.girls) ? obj.girls : []) {
+      const g = findGirl(story, e?.name);
+      if (!g) continue;
+      deltas[g.id] = {
+        d: Math.max(-10, Math.min(10, Math.round(Number(e.affection_change) || 0))),
+        reason: String(e.reason || '').slice(0, 120),
+      };
+      if (e.mood) moods[g.id] = String(e.mood).slice(0, 40);
+    }
+    // older single-character format
+    if (!Object.keys(deltas).length && obj.affection_change !== undefined && story.cast.length === 1) {
+      deltas[story.cast[0].id] = { d: Math.max(-10, Math.min(10, Math.round(Number(obj.affection_change) || 0))), reason: String(obj.affection_reason || '') };
+    }
+
+    let inPicture = (Array.isArray(obj.in_picture) ? obj.in_picture : []).map((n) => findGirl(story, n)?.id).filter(Boolean);
+    if (!inPicture.length) inPicture = [...new Set(lines.map((l) => l.who).filter((w) => w !== 'narrator'))];
+    if (!inPicture.length) inPicture = [story.cast[0].id];
+
     return {
-      reply: obj.reply.trim(),
-      mood: String(obj.mood || '').slice(0, 40),
-      delta: Math.max(-10, Math.min(10, Math.round(Number(obj.affection_change) || 0))),
-      reason: String(obj.affection_reason || '').slice(0, 120),
+      lines,
+      text: transcript(story, lines),
+      deltas,
+      moods,
       scene: String(obj.scene || ''),
       sceneChanged: Boolean(obj.new_picture ?? obj.scene_changed),
+      inPicture: [...new Set(inPicture)].slice(0, 3),
       remember: Array.isArray(obj.remember) ? obj.remember.map(String).filter(Boolean).slice(0, 2) : [],
       suggestions: Array.isArray(obj.suggestions) ? obj.suggestions.map(String).filter(Boolean).slice(0, 3) : [],
       keyMoment: String(obj.key_moment || '').trim().slice(0, 60),
@@ -240,27 +349,28 @@ ${memories}
   }
 
   // ---- Public functions ---------------------------------------------------------
-  async function chatReply(char, chat, settings) {
+  async function chatReply(story, chat, settings) {
     const cand = await generate(
       'text',
       settings.textModel,
       {
-        systemInstruction: { parts: [{ text: systemPrompt(char, chat, settings) }] },
+        systemInstruction: { parts: [{ text: systemPrompt(story, chat, settings) }] },
         contents: buildContents(chat),
         safetySettings: safetySettings(settings.safety),
         generationConfig: { temperature: 1.0, responseMimeType: 'application/json', responseSchema: REPLY_SCHEMA },
       },
       settings,
     );
-    return parseReply(textOf(cand));
+    return parseReply(textOf(cand), story);
   }
 
-  // Draws a picture. If a reference picture (the character's portrait) is given,
-  // the AI is asked to keep the character looking the same.
-  async function image(prompt, settings, referenceDataUrl = null) {
+  // Draws a picture. Reference pictures (the women's portraits) keep them looking the same.
+  async function image(prompt, settings, references = []) {
     const parts = [];
-    const ref = referenceDataUrl && splitDataUrl(referenceDataUrl);
-    if (ref) parts.push({ inlineData: ref });
+    for (const r of [].concat(references || [])) {
+      const ref = r && splitDataUrl(r);
+      if (ref) parts.push({ inlineData: ref });
+    }
     parts.push({ text: prompt });
     const cand = await generate(
       'image',
@@ -278,7 +388,7 @@ ${memories}
   }
 
   // ---- Picture style ------------------------------------------------------------
-  // One fixed style for every picture keeps a character looking the same from picture to picture.
+  // One fixed style for every picture keeps the women looking the same from picture to picture.
   const STYLE_PRESETS = {
     photo:
       'Photorealistic cinematic photograph, like a still from a live-action film: real camera, 50mm lens, natural skin texture, ' +
@@ -288,18 +398,18 @@ ${memories}
     anime: 'High-quality anime illustration with clean line art, cel shading and vibrant colours. NOT a photograph, NOT a painting, NOT a 3D render.',
   };
   // Returns { key, text }: key changes whenever the look changes (used to know when a portrait must be redrawn).
-  function styleFor(char, settings) {
+  function styleFor(story, settings) {
     const mode = STYLE_PRESETS[settings.pictureStyle] ? settings.pictureStyle : 'character';
     if (mode !== 'character') return { key: mode, text: STYLE_PRESETS[mode] };
-    return { key: 'c:' + char.artStyle, text: `${char.artStyle}. Use this exact art style and medium consistently.` };
+    return { key: 'c:' + story.artStyle, text: `${story.artStyle}. Use this exact art style and medium consistently.` };
   }
 
-  const portraitPrompt = (char, style) => `STYLE: ${style}
+  const portraitPrompt = (story, girl, style) => `STYLE: ${style}
 
 Character portrait for an interactive story.
-${char.name}, an adult (${char.age}). ${char.appearance}
-Upper body, facing the viewer with an expression that fits this personality: ${char.personality.split('.')[0]}.
-Softly blurred background that hints at: ${char.scenario}
+${girl.name}, an adult woman (${girl.age}). ${girl.appearance}
+Upper body, facing the viewer with an expression that fits this personality: ${girl.personality.split('.')[0]}.
+Softly blurred background that hints at: ${story.scenario}
 Single character, no text, no captions, no watermark, no speech bubbles.
 Remember the style: ${style}`;
 
@@ -307,28 +417,33 @@ Remember the style: ${style}`;
     man: 'If "the viewer" or the user appears, he is an adult man (seen partly, from behind or over the shoulder, never the focus).',
     woman: 'If "the viewer" or the user appears, she is an adult woman (seen partly, from behind or over the shoulder, never the focus).',
   };
-  const scenePrompt = (char, scene, hasReference, userGender, style) => `STYLE: ${style}
+
+  // girls: the women in the picture; refCount: how many of them have a reference portrait attached (in the same order).
+  function scenePrompt(story, girls, scene, refCount, userGender, style) {
+    const refs = girls.slice(0, refCount);
+    const refText = refs.length
+      ? refs.map((g, i) => `Reference image ${i + 1} shows ${g.name}.`).join(' ') +
+        ` Keep each woman's face, hair and body exactly the same as in her reference, AND match the references' look exactly: same medium, same realism, same lighting and colour treatment. The new picture must look like it belongs to the same set.\n`
+      : '';
+    return `STYLE: ${style}
 
 A new picture for an interactive story.
-${
-  hasReference
-    ? `The reference image shows ${char.name}. Keep their face, hair and body exactly the same, AND match the reference image's look exactly: same medium, same realism, same lighting and colour treatment. The new picture must look like it belongs to the same set as the reference.\n`
-    : ''
-}${char.name} (adult): ${char.appearance}
+${refText}${girls.map((g) => `${g.name} (adult woman): ${g.appearance}`).join('\n')}
 Scene: ${scene}
 ${VIEWER[userGender] || ''}
-${char.name} is the main subject. All people shown are adults. No text, no captions, no watermark, no speech bubbles.
+${girls.length > 1 ? `${girls.map((g) => g.name).join(' and ')} are the main subjects.` : `${girls[0].name} is the main subject.`} All people shown are adults. No text, no captions, no watermark, no speech bubbles.
 Remember the style: ${style}`;
+  }
 
   // ---- Video (Veo on Vertex AI) ----------------------------------------------------
   // Starting a video returns an "operation" name; we then ask every few seconds whether it is done.
-  async function videoStart(char, scene, imageDataUrl, settings) {
+  async function videoStart(story, scene, imageDataUrl, settings) {
     const img = splitDataUrl(imageDataUrl);
     if (!img) throw new ApiError(t('errNoVideo'));
-    const style = styleFor(char, settings).text;
-    const prompt = `Animate this image of ${char.name}. Scene: ${scene || char.scenario}
+    const style = styleFor(story, settings).text;
+    const prompt = `Animate this image from the story "${story.title || story.cast[0].name}". Scene: ${scene || story.scenario}
 Subtle, natural motion: breathing, blinking, hair and clothing moving gently, one small expressive gesture, soft ambient movement in the background, slow cinematic push-in.
-Keep the look of the image exactly (${style}), and keep the character and the composition the same. All people shown are adults. No text or captions.`;
+Keep the look of the image exactly (${style}), and keep the people and the composition the same. All people shown are adults. No text or captions.`;
     const data = await call(`video/start/${encodeURIComponent(settings.videoModel)}`, {
       password: settings.password,
       model: settings.videoModel,
@@ -378,11 +493,14 @@ Keep the look of the image exactly (${style}), and keep the character and the co
     tierLabel,
     nextTierMin,
     loc,
+    girlName,
+    storyTitle,
+    transcript,
     chatReply,
     image,
+    styleFor,
     portraitPrompt,
     scenePrompt,
-    styleFor,
     videoStart,
     videoPoll,
     ping,
