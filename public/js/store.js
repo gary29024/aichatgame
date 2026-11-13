@@ -55,6 +55,15 @@ window.Store = (() => {
         memoryFallback.set(key, value);
       }
     },
+    async keys(prefix = '') {
+      try {
+        const db = await open();
+        const all = db ? await run('readonly', (s) => s.getAllKeys()) : [...memoryFallback.keys()];
+        return (all || []).filter((k) => typeof k === 'string' && k.startsWith(prefix));
+      } catch {
+        return [];
+      }
+    },
     async del(key) {
       try {
         const db = await open();

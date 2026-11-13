@@ -18,13 +18,10 @@
     <!-- Home: pick a character -->
     <section id="home" class="screen">
       <header class="topbar">
-        <h1>Kindred <span>AI story chat</span></h1>
+        <h1>Kindred <span data-i18n="appTagline">AI story chat</span></h1>
         <button id="btn-settings" class="icon" aria-label="Settings">⚙︎</button>
       </header>
-      <div id="key-banner" class="banner" hidden>
-        <p><strong>Welcome!</strong> To start chatting, add your Gemini API key.</p>
-        <button id="banner-settings" class="primary">Open settings</button>
-      </div>
+      <div id="key-banner" class="banner" hidden></div>
       <div id="char-grid" class="grid"></div>
     </section>
 
@@ -37,6 +34,7 @@
           <div id="chat-name"></div>
           <div id="chat-mood"></div>
         </div>
+        <button id="btn-gallery" class="icon small" aria-label="Gallery">🖼️</button>
         <button id="btn-menu" class="icon" aria-label="Menu">⋯</button>
       </header>
       <div id="affection" class="affection" title="Affection">
@@ -48,18 +46,31 @@
       <div id="messages"></div>
       <div id="suggestions"></div>
       <form id="composer" autocomplete="off">
-        <textarea id="input" rows="1" placeholder="Say something… use *asterisks* for actions"></textarea>
+        <textarea id="input" rows="1" data-i18n-ph="inputPlaceholder" placeholder="Say something… use *asterisks* for actions"></textarea>
         <button id="send" type="submit" class="primary" aria-label="Send">➤</button>
       </form>
+    </section>
+
+    <!-- Gallery: special memories and story pictures -->
+    <section id="gallery" class="screen" hidden>
+      <header class="chat-top">
+        <button id="btn-gallery-back" class="icon" aria-label="Back">‹</button>
+        <div class="who">
+          <div id="gallery-name"></div>
+          <div id="gallery-count"></div>
+        </div>
+      </header>
+      <div id="gallery-body"></div>
     </section>
   </main>
 
   <dialog id="modal"><form id="modal-form" novalidate></form></dialog>
   <div id="toasts" aria-live="polite"></div>
 
+  <script src="js/i18n.js"></script>
   <script src="js/store.js"></script>
   <script src="js/characters.js"></script>
-  <script src="js/gemini.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

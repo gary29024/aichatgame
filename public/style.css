@@ -200,3 +200,47 @@ dialog.image #modal-form { padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Gallery, motion effect and viewer ---------- */
+button.icon.small { font-size: 20px; }
+#gallery-count { font-size: 13px; color: var(--muted); }
+#gallery-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#gallery-body { flex: 1; overflow-y: auto; padding: 8px 16px calc(env(safe-area-inset-bottom) + 24px); }
+#gallery-body h3 { margin: 18px 0 10px; font-size: 15px; color: var(--act); letter-spacing: .02em; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tile .pic { width: 100%; margin: 0; cursor: pointer; position: relative; }
+.tile-title { font-size: 13.5px; font-weight: 600; }
+.tile-sub { font-size: 12px; color: var(--muted); margin-top: -4px; }
+.tile.locked .pic { cursor: default; display: grid; place-items: center; background: #160f20; }
+.tile.locked img.blur { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(14px) grayscale(.6) brightness(.45); transform: scale(1.15); animation: none; }
+.tile.locked .lock { position: relative; font-size: 32px; }
+.tile.locked .tile-title { color: var(--muted); }
+.pic.empty { display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); background: var(--panel); border-radius: var(--radius); }
+
+.pic { position: relative; }
+.pic video { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+.pic.has-video::before { content: '▶︎ ' ; position: absolute; z-index: 2; top: 8px; left: 8px; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
+
+/* Free "live picture" effect: slow zoom and drift, plus a soft light sweep */
+.pic.live:not(.has-video) img { animation: drift 18s ease-in-out infinite alternate; transform-origin: 50% 35%; }
+.pic.live:not(.has-video)::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 240, 255, .14) 50%, transparent 65%);
+  background-size: 300% 100%; animation: sweep 9s ease-in-out infinite; mix-blend-mode: screen;
+}
+@keyframes drift {
+  0% { transform: scale(1.02) translate(0, 0); }
+  50% { transform: scale(1.07) translate(-1.2%, -1%); }
+  100% { transform: scale(1.04) translate(1%, .6%); }
+}
+@keyframes sweep { 0%, 55% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+
+.tools .status { font-size: 12.5px; color: var(--act); padding: 4px 4px; animation: glowtext 1.6s ease-in-out infinite; }
+@keyframes glowtext { 50% { opacity: .45; } }
+
+dialog.viewer { width: min(560px, calc(100vw - 16px)); }
+.viewer-media img, .viewer-media video { width: 100%; max-height: 70dvh; object-fit: contain; display: block; border-radius: 14px; background: #000; }
+.caption { margin: 0; font-size: 14px; color: var(--muted); }
+a.btn { display: inline-block; text-decoration: none; color: var(--text); background: var(--panel-2); border-radius: 12px; padding: 10px 14px; }
+.banner p { flex: 1; min-width: 200px; }

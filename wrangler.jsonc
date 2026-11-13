@@ -1,0 +1,17 @@
+// Cloudflare Worker configuration.
+// The Worker name must match the name of the Worker in your Cloudflare dashboard.
+// Passwords and keys are NOT stored here: set them in the dashboard
+// (Worker → Settings → Variables and Secrets). See README.md.
+{
+  "name": "aichatgame",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-13",
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  // Keep the variables you set in the dashboard when a new version is deployed from GitHub.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}
