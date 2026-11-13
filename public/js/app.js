@@ -221,31 +221,50 @@
   const saveJobs = () => putDoc('jobs', S.videoJobs);
   const saveSettings = () => Store.set('settings', S.settings); // settings stay on this device
 
-  // Affection per woman, as saved in the summary (older saves stored a single number).
+  // ---- Relationship points: 7 levels of 100 points each ----
+  // Older saves used one 0-100 bar; those numbers are scaled up once so progress is kept.
+  const OLD_SCALE = Api.MAX_POINTS / 100;
+  const startPoints = (g) => clamp(Math.round((Number(g.startAffection) || 15) * 3), 0, Api.POINTS_PER_LEVEL - 1);
+  const atPoints = (m) => Math.round((m.at / 100) * Api.MAX_POINTS); // when a special scene unlocks
+  const levelText = (points) => {
+    const L = Api.levelOf(points);
+    return t('levelShort', { lv: L.lv, level: Api.levelName(L.i) });
+  };
+
+  // Points per woman, as saved in the summary.
   function progressOf(story) {
     const p = S.index.progress[story.id];
     if (p == null) return null;
-    return typeof p === 'number' ? { [story.cast[0].id]: p } : p;
+    if (typeof p === 'number') return { [story.cast[0].id]: Math.round(p * OLD_SCALE) };
+    if (!p.$lv) return Object.fromEntries(Object.entries(p).map(([k, v]) => [k, Math.round(v * OLD_SCALE)]));
+    const { $lv, ...points } = p;
+    return points;
   }
 
   async function saveChat(story, chat) {
-    S.index.progress[story.id] = { ...chat.aff };
+    S.index.progress[story.id] = { ...chat.aff, $lv: 1 };
     await Promise.all([putDoc('chat:' + story.id, chat), saveIndex()]);
   }
 
-  // Older chats had one affection number; now each woman has her own.
+  // Bring older saves up to date: one number -> one per woman; 0-100 bar -> level points.
   function normalizeChat(story, chat) {
     if (!chat.aff) {
       const g0 = story.cast[0];
-      chat.aff = { [g0.id]: typeof chat.affection === 'number' ? chat.affection : clamp(Number(g0.startAffection) || 15, 0, 100) };
+      chat.aff = typeof chat.affection === 'number' ? { [g0.id]: chat.affection } : {};
       chat.moods = { [g0.id]: chat.mood || '' };
       delete chat.affection;
       delete chat.mood;
     }
+    if (!chat.lv) {
+      for (const k of Object.keys(chat.aff)) chat.aff[k] = Math.round(chat.aff[k] * OLD_SCALE);
+      chat.lv = 1;
+    }
     chat.moods = chat.moods || {};
     for (const g of story.cast) {
-      if (typeof chat.aff[g.id] !== 'number') chat.aff[g.id] = clamp(Math.round(Number(g.startAffection) || 15), 0, 100);
+      if (typeof chat.aff[g.id] !== 'number') chat.aff[g.id] = startPoints(g);
     }
+    chat.state = chat.state || { location: '', outfits: {} };
+    chat.state.outfits = chat.state.outfits || {};
     chat.memories = chat.memories || [];
     chat.suggestions = chat.suggestions || [];
     return chat;
@@ -392,7 +411,7 @@
         if (chat) {
           normalizeChat(s, chat);
           await putDoc('chat:' + s.id, chat);
-          index.progress[s.id] = { ...chat.aff };
+          index.progress[s.id] = { ...chat.aff, $lv: 1 };
         }
         const g = await Store.get('gallery:' + s.id);
         if (g) {
@@ -460,7 +479,7 @@
     const aff = {};
     const moods = {};
     for (const g of story.cast) {
-      aff[g.id] = clamp(Math.round(Number(g.startAffection) || 15), 0, 100);
+      aff[g.id] = startPoints(g);
       moods[g.id] = '';
     }
     const greeting = loc(story, 'greeting');
@@ -472,7 +491,7 @@
     } else {
       first = { id: uid(), role: 'char', text: greeting, scene: story.scenario, inPicture: [story.cast[0].id] };
     }
-    return { aff, moods, memories: [], suggestions: [], messages: [first] };
+    return { lv: 1, aff, moods, state: { location: '', outfits: {} }, memories: [], suggestions: [], messages: [first] };
   }
 
   // Special scenes per woman. Keys stay as plain numbers for one-woman stories (older saves).
@@ -561,11 +580,9 @@
       const unlocked = S.index.unlocks[s.id] || 0;
       let progressHtml = '';
       if (prog) {
-        const values = s.cast.map((g) => prog[g.id] ?? 0);
-        const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-        const label = isMulti(s)
-          ? s.cast.map((g) => `${shortName(g)} ${prog[g.id] ?? 0}`).join(' · ')
-          : `${Api.tierLabel(Api.tierIndex(values[0]))} · ${values[0]}`;
+        const levels = s.cast.map((g) => Api.levelOf(prog[g.id] ?? 0));
+        const avg = Math.round(levels.reduce((a, L) => a + L.into, 0) / levels.length);
+        const label = isMulti(s) ? s.cast.map((g, i) => `${shortName(g)} Lv${levels[i].lv}`).join(' · ') : levelText(prog[s.cast[0].id] ?? 0);
         progressHtml = `<span class="mini-bar"><span style="width:${avg}%"></span></span>
           <span class="mini-label">♥ ${esc(label)}${unlocked ? ` · 🔓 ${unlocked}/${allMilestones(s).length}` : ''}</span>`;
       }
@@ -671,13 +688,13 @@
 
     $('#affection').innerHTML = story.cast
       .map((g) => {
-        const a = chat.aff[g.id];
-        const next = Api.nextTierMin(a);
-        const num = multi ? String(a) : next !== null ? t('nextAt', { a, n: next }) : t('maxed', { a });
+        const L = Api.levelOf(chat.aff[g.id]);
+        const maxed = L.lv === Api.LEVELS.length && L.into >= Api.POINTS_PER_LEVEL;
+        const num = maxed ? 'MAX' : `${L.into}/${Api.POINTS_PER_LEVEL}`;
         return `<div class="aff-row" data-girl="${esc(g.id)}" style="--gc:${girlColor(story, g)}">
           ${multi ? `<span class="aff-who">${esc(shortName(g))}</span>` : '<span class="heart">♥</span>'}
-          <div class="bar"><div class="fill" style="width:${a}%"></div></div>
-          <span class="aff-label">${esc(Api.tierLabel(Api.tierIndex(a)))}</span>
+          <div class="bar"><div class="fill" style="width:${L.into}%"></div></div>
+          <span class="aff-label">${esc(levelText(chat.aff[g.id]))}</span>
           <span class="aff-num">${esc(num)}</span>
         </div>`;
       })
@@ -764,7 +781,8 @@
       const before = { ...chat.aff };
       const applied = {};
       for (const [gid, v] of Object.entries(r.deltas)) {
-        chat.aff[gid] = clamp((chat.aff[gid] ?? 0) + v.d, 0, 100);
+        const prev = chat.aff[gid] ?? 0;
+        chat.aff[gid] = clamp(prev + v.d, Api.levelOf(prev).floor, Api.MAX_POINTS); // levels once reached are kept
         applied[gid] = { d: chat.aff[gid] - before[gid], reason: v.reason };
       }
       const msg = {
@@ -779,6 +797,11 @@
         memAdded: 0,
       };
       Object.assign(chat.moods, r.moods);
+      // Remember where we are and what everyone wears, so pictures match the story
+      if (r.location) chat.state.location = r.location;
+      Object.assign(chat.state.outfits, r.outfits);
+      msg.location = chat.state.location;
+      msg.outfits = { ...chat.state.outfits };
       for (const fact of r.remember) {
         if (!chat.memories.some((x) => x.toLowerCase() === fact.toLowerCase())) {
           chat.memories.push(fact);
@@ -789,7 +812,17 @@
       chat.suggestions = r.suggestions;
       let moment = null;
       if (r.keyMoment && momentAllowed(chat)) {
-        moment = { id: uid(), title: r.keyMoment, scene: r.scene, inPicture: r.inPicture, at: Date.now(), image: null };
+        moment = {
+          id: uid(),
+          title: r.keyMoment,
+          scene: r.scene,
+          inPicture: r.inPicture,
+          outfits: msg.outfits,
+          location: msg.location,
+          text: plain(r.lines ? r.lines.map((l) => l.text).join(' ') : r.text).slice(0, 700),
+          at: Date.now(),
+          image: null,
+        };
         msg.momentTitle = moment.title;
         msg.momentId = moment.id;
       }
@@ -835,11 +868,11 @@
       void row.offsetWidth; // restart the animation
       row.classList.add(after > before ? 'pulse-up' : 'pulse-down');
     }
-    const i1 = Api.tierIndex(before);
-    const i2 = Api.tierIndex(after);
-    if (i1 !== i2) {
-      const up = i2 > i1;
-      toast(t(up ? 'nowLevelUp' : 'nowLevelDown', { name: shortName(girl), level: Api.tierLabel(i2) }), up ? 'good' : 'bad');
+    const L1 = Api.levelOf(before);
+    const L2 = Api.levelOf(after);
+    if (L1.i !== L2.i) {
+      const up = L2.i > L1.i;
+      toast(t(up ? 'nowLevelUp' : 'nowLevelDown', { name: shortName(girl), lv: L2.lv, level: Api.levelName(L2.i) }), up ? 'good' : 'bad');
     }
   }
 
@@ -850,10 +883,10 @@
     if (i <= 0) return;
     const m = chat.messages[i];
     if (m.deltas) {
-      for (const [gid, v] of Object.entries(m.deltas)) chat.aff[gid] = clamp((chat.aff[gid] ?? 0) - (v.d || 0), 0, 100);
+      for (const [gid, v] of Object.entries(m.deltas)) chat.aff[gid] = clamp((chat.aff[gid] ?? 0) - (v.d || 0), 0, Api.MAX_POINTS);
     } else if (m.delta) {
       const g0 = story.cast[0].id;
-      chat.aff[g0] = clamp(chat.aff[g0] - m.delta, 0, 100);
+      chat.aff[g0] = clamp(chat.aff[g0] - m.delta, 0, Api.MAX_POINTS);
     }
     if (m.memAdded) chat.memories.splice(-m.memAdded, m.memAdded);
     if (m.prevMoods) chat.moods = { ...m.prevMoods };
@@ -901,14 +934,14 @@
   }
 
   // Draws a picture of some of the women and saves it. Returns the new picture id.
-  async function drawPicture(story, girlIds, scene) {
+  async function drawPicture(story, girlIds, scene, ctx = {}) {
     let girls = (girlIds || []).map((id) => girlById(story, id)).filter(Boolean);
     if (!girls.length) girls = [story.cast[0]];
     const refs = await Promise.all(girls.map((g) => ensurePortrait(story, g)));
     // women with a portrait first, so "reference image N" matches the Nth woman
     const ordered = girls.map((g, i) => ({ g, r: refs[i] })).sort((a, b) => Number(Boolean(b.r)) - Number(Boolean(a.r)));
     const refList = ordered.filter((x) => x.r).map((x) => x.r);
-    const url = await Api.drawScene(story, ordered.map((x) => x.g), scene, refList, S.settings);
+    const url = await Api.drawScene(story, ordered.map((x) => x.g), scene, refList, S.settings, ctx);
     const id = uid();
     await putImage(id, url);
     return id;
@@ -921,7 +954,8 @@
     try {
       const scene = msg.scene || story.scenario;
       const inPicture = msg.inPicture?.length ? msg.inPicture : [story.cast[0].id];
-      const id = await drawPicture(story, inPicture, scene);
+      const text = plain(msg.lines ? msg.lines.map((l) => l.text).join(' ') : msg.text);
+      const id = await drawPicture(story, inPicture, scene, { outfits: msg.outfits, location: msg.location, text });
       const g = await getGallery(story.id);
       g.items.push({ id, at: Date.now(), caption: plain(msg.lines ? msg.lines.map((l) => l.text).join(' ') : msg.text).slice(0, 140), scene, inPicture });
       await saveGallery(story, g);
@@ -954,7 +988,11 @@
     if (msg) S.drawing.add(msg.id);
     refreshViews(story);
     try {
-      const id = await drawPicture(story, moment.inPicture, moment.scene || story.scenario);
+      const id = await drawPicture(story, moment.inPicture, moment.scene || story.scenario, {
+        outfits: moment.outfits,
+        location: moment.location,
+        text: moment.text,
+      });
       const g = await getGallery(story.id);
       const stored = g.moments.find((x) => x.id === moment.id);
       if (stored) stored.image = id;
@@ -975,7 +1013,7 @@
   // ---------- Milestones (special scenes unlocked by each woman's affection) ----------
   async function checkMilestones(story, chat) {
     const g = await getGallery(story.id);
-    const newly = allMilestones(story).filter((x) => chat.aff[x.girl.id] >= x.m.at && !g.unlocked[x.key]);
+    const newly = allMilestones(story).filter((x) => chat.aff[x.girl.id] >= atPoints(x.m) && !g.unlocked[x.key]);
     if (!newly.length) return;
     for (const x of newly) g.unlocked[x.key] = { at: Date.now(), image: null };
     await saveGallery(story, g);
@@ -1092,9 +1130,10 @@
         : `<div class="tile"><button class="pic empty" data-act="draw-ms" ${data}>🖼️<br>${esc(t('tapToDraw'))}</button>${title}</div>`;
     }
     const portrait = S.portraits[x.girl.id];
-    const tier = Api.tierLabel(Api.tierIndex(x.m.at));
+    const L = Api.levelOf(atPoints(x.m));
+    const lockText = t('lockedAt', { lv: L.lv, level: Api.levelName(L.i), pct: L.into });
     return `<div class="tile locked"><div class="pic">${portrait ? `<img class="blur" src="${esc(portrait)}" alt="">` : ''}<span class="lock">🔒</span></div>
-      ${title}<span class="tile-sub">${esc(t('lockedAt', { level: tier, n: x.m.at }))}</span></div>`;
+      ${title}<span class="tile-sub">${esc(lockText)}</span></div>`;
   }
 
   async function renderGallery() {

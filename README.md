@@ -12,12 +12,13 @@ It runs on **Cloudflare**. The AI requests go through **Cloudflare AI Gateway** 
   - You can also **create your own** one-on-one characters or edit them. By default you play as a man (changeable in Settings).
 - **💭 Private thoughts.** Some replies show what a woman is secretly thinking. You can read it; your character can't hear it.
 - **English or Traditional Chinese.** In Chinese mode, menus are in Chinese and characters talk in **Hong Kong Cantonese (廣東話)**.
-- **Affection meter**, from *Cold / 冷淡* to *Devoted / 死心塌地*. Characters act differently at each level. Every reply shows its effect, e.g. `+3 ♥ liked the honesty`.
+- **Relationship levels.** Each woman goes through 7 levels: Stranger → Acquaintance → Friend → Close friend → Crush → Lover → Soulmate. Each level has its own bar (0–100). A good reply usually adds 1–4 points, so every level takes a while to build. Levels you've reached are never lost, and the women won't skip ahead (no kiss before "Crush", no intimacy before "Lover").
+- **Pictures match the reply.** The AI tracks where you are and what each woman is wearing, and every picture shows the exact moment the reply ends on.
 - **Pictures.** The app draws the character's portrait first and uses it as a reference, so later scene pictures look like the same person.
 - **Motion effect.** Pictures gently drift and shimmer, like a "live photo". It is free and can be turned off in Settings.
 - **Videos.** Tap **🎬 Animate** on any picture to make a short real video of it with Google's Veo.
 - **Gallery (🖼️)**:
-  - *Special memories*: scenes locked 🔒 until affection rises. One-on-one stories have eight (at 20, 30, 40, 50, 60, 70, 85, 100); group stories have four per woman (at 25, 50, 75, 100). Once unlocked they stay unlocked, even if you restart the story.
+  - *Special memories*: scenes locked 🔒 until the relationship grows, spread across the 7 levels (eight for one-on-one stories, four per woman in group stories). Each locked card shows when it unlocks. Once unlocked they stay unlocked, even if you restart the story.
   - *Key moments*: when something big happens in your story (first date, confession, first kiss…), the AI turns it into a new card with its own picture. There is no limit.
   - *Story moments*: every picture and video from your chats.
 - **Memory.** The AI notes important facts as you play (⋯ menu → memories).
@@ -127,7 +128,7 @@ Cloudflare's free plan is enough for personal use.
 | Picture style | Realistic photo (default), painted, anime, or each character's own style. Changing it redraws each portrait once. |
 | Picture motion | Gentle movement on still pictures (free). |
 | Video length | 4, 6 or 8 seconds for 🎬 videos. |
-| Romance level | *Mature* allows adult romance and intimate moments once the relationship has built up. *Flirty* stops at kissing. *Sweet* keeps it wholesome. |
+| Romance level | *Mature*: steamy but never graphic. Kissing from the Crush level, intimacy from the Lover level, always cutting away before anything explicit. *Flirty*: kissing, then fade to black. *Sweet*: wholesome. Pictures are always clothed (lingerie or sleepwear for intimate moments). |
 | Google safety filter | How strict Google's adjustable filters are. Google always applies its own fixed rules on top, so very explicit requests, pictures or videos may still be blocked. |
 | App password | The `APP_PASSWORD` from Part C. |
 | Advanced: AI models | Which models write, draw and animate. |
