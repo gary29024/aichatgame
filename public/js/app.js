@@ -507,8 +507,14 @@
   const isCurrent = (story, chat) => S.story && S.story.id === story.id && S.chat === chat;
   const picturesOn = () => S.settings.pictureMode !== 'off';
   const styleOf = (story) => Api.styleFor(story, S.settings);
-  // The portrait is the reference for every picture, so it must be drawn in the current style.
-  const portraitOk = (story, girl) => Boolean(S.portraits[girl.id]) && S.index.portraitStyles[girl.id] === styleOf(story).key;
+  // The portrait is the reference for every picture, so it must match the current style and her current description.
+  const hashText = (text) => {
+    let h = 5381;
+    for (const ch of String(text || '')) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+    return h.toString(36);
+  };
+  const portraitKey = (story, girl) => `${styleOf(story).key}|${hashText(girl.appearance)}`;
+  const portraitOk = (story, girl) => Boolean(S.portraits[girl.id]) && S.index.portraitStyles[girl.id] === portraitKey(story, girl);
 
   // ---------- Navigation (uses the address bar so the phone's back button works) ----------
   function route() {
@@ -909,13 +915,13 @@
     if (S.portraitJobs.has(girl.id)) return S.portraitJobs.get(girl.id);
     const job = (async () => {
       try {
-        const style = styleOf(story);
+        const key = portraitKey(story, girl);
         const url = await Api.drawPortrait(story, girl, S.settings);
         const oldId = S.index.portraits[girl.id];
         const pid = uid();
         await putImage(pid, url);
         S.index.portraits[girl.id] = pid;
-        S.index.portraitStyles[girl.id] = style.key;
+        S.index.portraitStyles[girl.id] = key;
         S.portraits[girl.id] = url;
         await saveIndex();
         if (oldId) deleteMedia(oldId);
@@ -1427,7 +1433,7 @@
     ['gender', 'input', 'female'],
     ['genre', 'input', 'Fantasy / 奇幻'],
     ['tagline', 'input', ''],
-    ['appearance', 'textarea', 'Woman, 25, hair, eyes, build, clothes, distinctive features…'],
+    ['appearance', 'textarea', 'Korean / Japanese / Hong Kong woman, 25, hair, eyes, build, clothes, distinctive features…'],
     ['personality', 'textarea', ''],
     ['backstory', 'textarea', ''],
     ['speakingStyle', 'textarea', ''],

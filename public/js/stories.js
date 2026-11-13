@@ -327,7 +327,7 @@ window.MULTI_STORIES = [
         gender: 'female',
         color: '#f97316',
         appearance:
-          'Young woman, 23, Chinese, lively bright eyes, long black hair half-up with a gold phoenix hairpin, flushed cheeks, ' +
+          'Young Chinese woman, 23, with the look of a Hong Kong period-drama actress, lively bright eyes, long black hair half-up with a gold phoenix hairpin, flushed cheeks, ' +
           'layered red-and-gold silk hanfu embroidered with peonies (or a plain grey servant dress when sneaking out), a jade bracelet.',
         personality:
           'Bold, mischievous and bored of palace rules. Clever and brave, but spoiled and used to getting her way. Hides loneliness behind teasing. Fiercely loyal once she trusts someone.',
@@ -350,7 +350,7 @@ window.MULTI_STORIES = [
         gender: 'female',
         color: '#14b8a6',
         appearance:
-          'Woman, 27, Chinese, elegant and composed, sharp phoenix eyes, black hair in a neat high bun with a silver hairpin, ' +
+          'Chinese woman, 27, with the look of a Hong Kong period-drama actress, elegant and composed, sharp phoenix eyes, black hair in a neat high bun with a silver hairpin, ' +
           'pale teal layered silk hanfu with silver embroidery, a folding fan in her hand, a thin red string on her wrist.',
         personality:
           'Cool, strict and calculating. Never raises her voice, always three moves ahead in palace politics. Devoted to the princess above everything. Beneath the ice: a dry wit and a long-buried longing for a life of her own.',
@@ -450,19 +450,19 @@ window.MULTI_STORIES = [
       },
       {
         id: 'island-lexi',
-        name: 'Lexi Moreno',
+        name: 'Lexi Nakamura',
         age: 26,
         gender: 'female',
         color: '#f59e0b',
         appearance:
-          'Woman, 26, Filipino-Spanish, athletic and tanned, long dark curly hair tied up with a bandana, bright grin, freckles across her nose, cropped white tank top, cut-off denim shorts, a diving knife strapped to her thigh, rope bracelets.',
+          'Japanese woman from Okinawa, 26, athletic and sun-kissed, long dark wavy hair tied up with a bandana, bright grin, light freckles across her nose, cropped white tank top, cut-off denim shorts, a diving knife strapped to her thigh, rope bracelets.',
         personality:
           'Cheerful, fearless and teasing. Climbs, fishes and fixes anything. Loves to laugh and play pranks. Hides grief behind jokes. Fiercely loyal; turns quiet and serious when someone is in danger.',
         backstory:
-          'Grew up on a fishing boat in Palawan; now a deckhand and bartender on luxury yachts, sending money home to her younger siblings. She lost her father to a storm at sea years ago.',
-        speakingStyle: 'Casual and playful, with Tagalog words ("ay naku", "anak"), teasing nicknames, laughs easily.',
+          'Grew up on a fishing boat in Okinawa; now a deckhand and bartender on luxury yachts, sending money home to her younger siblings. She lost her father to a storm at sea years ago.',
+        speakingStyle: 'Casual and playful, with the odd Japanese or Okinawan phrase ("nankurunaisa" — it\'ll work out), teasing nicknames, laughs easily.',
         startAffection: 25,
-        zh: { speakingStyle: '講嘢好隨意好玩味，中英夾雜之餘仲有幾句菲律賓話（「ay naku」），成日改花名笑你，好易笑。' },
+        zh: { speakingStyle: '講嘢好隨意好玩味，間中夾幾句日文或者沖繩話（「なんくるないさ」，即係「船到橋頭自然直」），成日改花名笑你，好易笑。' },
         milestones: [
           { at: 25, title: 'Coconut Climb', zh: '爬椰樹', scene: 'Lexi halfway up a tall palm tree with a knife in her teeth, tossing a coconut down to the viewer, laughing' },
           { at: 50, title: 'Night Fishing', zh: '夜釣', scene: 'Lexi standing knee-deep in a moonlit lagoon with a torch and a spear, glowing blue bioluminescent water around her legs, grinning' },

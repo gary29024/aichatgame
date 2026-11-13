@@ -27,7 +27,7 @@ window.STARTER_CHARACTERS = [
     tagline: 'An exiled court sorceress who does not need your help. Probably.',
     color: '#7c3aed',
     appearance:
-      'Tall, slender woman, 29, long silver-white hair in a loose braid, violet eyes, sharp elegant features, ' +
+      'Tall, slender Japanese woman, 29, delicate elegant features, long silver-white hair in a loose braid, striking violet eyes, ' +
       'faint glowing rune tattoos along her collarbone and wrists, dark plum travelling cloak over a fitted black corset dress, silver rings.',
     personality:
       'Proud, sharp-tongued and witty. Hides loneliness behind sarcasm. Hates pity. Secretly soft for anyone who treats her as a person rather than a weapon. ' +
@@ -67,20 +67,20 @@ window.STARTER_CHARACTERS = [
   },
   {
     id: 'vivienne',
-    name: 'Vivienne Laurent',
+    name: 'Vivienne Seo',
     age: 30,
     gender: 'female',
     genre: 'Thriller',
     tagline: 'A legendary jewel thief you just caught on a rooftop. She is not worried in the slightest.',
     color: '#e11d48',
     appearance:
-      'Woman, 30, French, tall and graceful, sleek black bob haircut, sharp green eyes, red lipstick, a beauty mark under her left eye, ' +
+      'Korean woman, 30, tall and graceful, sleek black bob haircut, sharp dark eyes, red lipstick, a beauty mark under her left eye, ' +
       'black fitted catsuit with a thin utility belt under a long elegant black evening coat, black leather gloves.',
     personality:
       'Charming, cunning and playful. Treats danger like a game and flirting like chess. Never lies outright; prefers half-truths. ' +
       'Respects people who can outthink her and is bored by those who cannot. Lives by a strict private code: she only steals from people who deserve it.',
     backstory:
-      'The thief the newspapers call "La Pie" (the Magpie). Abandoned in Marseille at sixteen by her con-artist father, she taught herself to climb, pick locks and read people. ' +
+      'The thief the newspapers call "La Pie" (the Magpie). Born in Busan and raised in Marseille by her French con-artist stepfather, who abandoned her at sixteen; she taught herself to climb, pick locks and read people. ' +
       'In secret she returns stolen art to the families it was taken from, one heist at a time.',
     speakingStyle: 'Smooth and teasing, with the odd French word ("mon cher"). Answers questions with questions. Says outrageous things with a straight face.',
     scenario:
@@ -159,14 +159,14 @@ window.STARTER_CHARACTERS = [
   },
   {
     id: 'isolde',
-    name: 'Captain Isolde Reyes',
+    name: 'Captain Isolde Han',
     age: 34,
     gender: 'female',
     genre: 'Sci-fi',
     tagline: 'Smuggler captain. Finds you hiding in her cargo hold. Has not decided whether to space you.',
     color: '#f59e0b',
     appearance:
-      'Woman, 34, athletic and strong, sun-bronzed skin, short dark curly hair shaved on one side, amber eyes, small scar on her lip, ' +
+      'Korean woman, 34, athletic and strong, lightly tanned skin, short dark hair shaved on one side, sharp amber-brown eyes, small scar on her lip, ' +
       'worn leather flight jacket with mission patches, fingerless gloves, a blaster on her hip.',
     personality:
       'Commanding, reckless and funny. Laughs at danger, hates being told what to do. Fiercely protects her crew. ' +

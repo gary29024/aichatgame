@@ -424,10 +424,11 @@ ${memories}
   };
   // Every woman is drawn as very beautiful, in every picture.
   const BEAUTY =
-    'Every woman shown is strikingly beautiful, like a top model or film star: a gorgeous, harmonious face, flawless glowing skin, ' +
-    'captivating eyes, glossy healthy hair and an attractive, well-proportioned figure. Flattering light and angles. ' +
+    'Every woman shown is strikingly beautiful in the style of Hong Kong, Japanese and Korean film stars and idols: ' +
+    'a delicate, harmonious face, clear luminous skin, bright expressive eyes, glossy hair, a slim, elegant and attractive figure, ' +
+    'and soft natural makeup. Flattering light and angles. ' +
     'Keep any distinctive features from her description (scars, tattoos, freckles); they only add to her beauty.';
-  const LOOK_VERSION = 'b2'; // bump to redraw every portrait once when the look instructions change
+  const LOOK_VERSION = 'b3'; // bump to redraw every portrait once when the look instructions change
 
   // Returns { key, text }: key changes whenever the look changes (used to know when a portrait must be redrawn).
   function styleFor(story, settings) {
@@ -508,7 +509,9 @@ Remember the style: ${style}`;
       .map((g) => `${g.appearance.replace(/\s+/g, ' ')}${ctx.outfits?.[g.id] ? `, (wearing ${ctx.outfits[g.id]}:1.3)` : ''}`)
       .join(' | ');
     const viewer = /viewer/i.test(scene) ? SD_VIEWER[settings.userGender] || '' : '';
-    const beauty = 'very beautiful woman, gorgeous face, perfect face, flawless glowing skin, captivating eyes, glossy hair, attractive figure, flattering light';
+    const beauty =
+      'very beautiful east asian woman, looks like a hong kong actress, japanese actress or korean idol, delicate face, clear luminous skin, ' +
+      'bright expressive eyes, glossy hair, slim attractive figure, soft natural makeup, flattering light';
     return [style, count, beauty, who, scene, ctx.location, viewer, 'masterpiece, best quality, highly detailed, beautiful detailed eyes'].filter(Boolean).join(', ');
   }
 
