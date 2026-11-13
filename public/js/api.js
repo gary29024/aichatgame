@@ -144,6 +144,14 @@ ${memories}
     }
   }
 
+  // A short, readable piece of whatever came back, for error messages.
+  const snippet = (text) =>
+    String(text || '(empty)')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 220) || '(empty)';
+
   async function call(path, { password, body, method = 'POST', model }) {
     let res;
     try {
@@ -155,7 +163,18 @@ ${memories}
     } catch {
       throw new ApiError(t('errNetwork'), 'network');
     }
-    let data = await res.json().catch(() => ({}));
+    // Every answer from our own server carries this mark. If it is missing, Cloudflare answered
+    // without running src/worker.js (for example, the app was set up as "Pages" instead of a Worker).
+    const text = await res.text().catch(() => '');
+    if (res.headers.get('x-kindred-server') !== '1') {
+      throw new ApiError(t('errNotWorker', { status: res.status, snippet: snippet(text) }), 'setup');
+    }
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new ApiError(t('errUnexpected', { status: res.status, snippet: snippet(text) }), 'other');
+    }
     if (Array.isArray(data)) data = data[0] || {};
     if (res.status === 401) throw new ApiError(t('errPassword'), 'auth');
     if (!res.ok) {
@@ -173,7 +192,8 @@ ${memories}
     if (data.promptFeedback?.blockReason) throw new ApiError(t('errBlocked', { reason: data.promptFeedback.blockReason }), 'blocked');
     const cand = data.candidates?.[0];
     if (!cand || !cand.content?.parts?.length) {
-      throw new ApiError(t('errEmpty', { reason: cand?.finishReason || '?' }), 'blocked');
+      const reason = cand?.finishReason || data.promptFeedback?.blockReasonMessage || '?';
+      throw new ApiError(`${t('errEmpty', { reason })} ${t('gotBack', { snippet: snippet(JSON.stringify(data)) })}`, 'blocked');
     }
     return cand;
   }

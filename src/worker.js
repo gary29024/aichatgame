@@ -132,7 +132,7 @@ async function forward(env, location, model, method, body) {
   }
   return new Response(res.body, {
     status: res.status,
-    headers: { 'content-type': res.headers.get('content-type') || 'application/json', 'cache-control': 'no-store' },
+    headers: { 'content-type': res.headers.get('content-type') || 'application/json', 'cache-control': 'no-store', 'x-kindred-server': '1' },
   });
 }
 
@@ -171,7 +171,7 @@ async function passwordOk(request, expected) {
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-kindred-server': '1' },
   });
 }
 const badRequest = (message) => json({ error: { message } }, 400);
