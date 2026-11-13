@@ -16,6 +16,9 @@
     pictureStyle: 'photo', // 'photo' | 'painting' | 'anime' | 'character'
     textModel: 'gemini-3.8-flash',
     imageModel: 'gemini-nano-banana-2.1',
+    imageProvider: 'google', // 'google' | 'fal' (open-source models)
+    falModel: 'dreamshaper', // 'dreamshaper' | 'animagine' | 'realvis' | 'custom'
+    falCustomModel: '',
     videoModel: 'veo-3.1-fast-generate-001',
     pictureMode: 'scene', // 'scene' | 'every' | 'off'
     motion: 'on', // gentle movement on still pictures
@@ -874,7 +877,7 @@
     const job = (async () => {
       try {
         const style = styleOf(story);
-        const url = await Api.image(Api.portraitPrompt(story, girl, style.text), S.settings);
+        const url = await Api.drawPortrait(story, girl, S.settings);
         const oldId = S.index.portraits[girl.id];
         const pid = uid();
         await putImage(pid, url);
@@ -904,10 +907,8 @@
     const refs = await Promise.all(girls.map((g) => ensurePortrait(story, g)));
     // women with a portrait first, so "reference image N" matches the Nth woman
     const ordered = girls.map((g, i) => ({ g, r: refs[i] })).sort((a, b) => Number(Boolean(b.r)) - Number(Boolean(a.r)));
-    let refList = ordered.filter((x) => x.r).map((x) => x.r);
-    if (/lite/i.test(S.settings.imageModel)) refList = refList.slice(0, 1); // the Lite model takes one reference only
-    const prompt = Api.scenePrompt(story, ordered.map((x) => x.g), scene, refList.length, S.settings.userGender, styleOf(story).text);
-    const url = await Api.image(prompt, S.settings, refList);
+    const refList = ordered.filter((x) => x.r).map((x) => x.r);
+    const url = await Api.drawScene(story, ordered.map((x) => x.g), scene, refList, S.settings);
     const id = uid();
     await putImage(id, url);
     return id;
@@ -1272,6 +1273,18 @@
         ['every', t('picEvery')],
         ['off', t('picOff')],
       ])}</label>
+      <label>${esc(t('picMaker'))}${selectHtml('imageProvider', s.imageProvider, [
+        ['google', t('picMakerGoogle')],
+        ['fal', t('picMakerFal')],
+      ])}</label>
+      <label>${esc(t('falModel'))}${selectHtml('falModel', s.falModel, [
+        ['dreamshaper', t('falDreamshaper')],
+        ['animagine', t('falAnimagine')],
+        ['realvis', t('falRealvis')],
+        ['custom', t('falCustom')],
+      ])}</label>
+      <input name="falCustomModel" value="${esc(s.falCustomModel)}" placeholder="${esc(t('falCustomPh'))}">
+      <p class="hint">${esc(t('falHint'))}</p>
       <label>${esc(t('pictureStyle'))}${selectHtml('pictureStyle', s.pictureStyle, [
         ['photo', t('styPhoto')],
         ['painting', t('styPainting')],
@@ -1326,6 +1339,9 @@
           userGender: String(f.get('userGender')),
           pictureMode: String(f.get('pictureMode')),
           pictureStyle: String(f.get('pictureStyle')),
+          imageProvider: String(f.get('imageProvider')),
+          falModel: String(f.get('falModel')),
+          falCustomModel: String(f.get('falCustomModel') || '').trim(),
           motion: String(f.get('motion')),
           videoSeconds: String(f.get('videoSeconds')),
           romance: String(f.get('romance')),

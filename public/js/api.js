@@ -400,8 +400,9 @@ ${memories}
   // Returns { key, text }: key changes whenever the look changes (used to know when a portrait must be redrawn).
   function styleFor(story, settings) {
     const mode = STYLE_PRESETS[settings.pictureStyle] ? settings.pictureStyle : 'character';
-    if (mode !== 'character') return { key: mode, text: STYLE_PRESETS[mode] };
-    return { key: 'c:' + story.artStyle, text: `${story.artStyle}. Use this exact art style and medium consistently.` };
+    const maker = settings.imageProvider === 'fal' ? `fal:${falModelOf(settings)}:` : '';
+    if (mode !== 'character') return { key: maker + mode, text: STYLE_PRESETS[mode] };
+    return { key: maker + 'c:' + story.artStyle, text: `${story.artStyle}. Use this exact art style and medium consistently.` };
   }
 
   const portraitPrompt = (story, girl, style) => `STYLE: ${style}
@@ -433,6 +434,108 @@ Scene: ${scene}
 ${VIEWER[userGender] || ''}
 ${girls.length > 1 ? `${girls.map((g) => g.name).join(' and ')} are the main subjects.` : `${girls[0].name} is the main subject.`} All people shown are adults. No text, no captions, no watermark, no speech bubbles.
 Remember the style: ${style}`;
+  }
+
+  // ---- Open-source pictures (SDXL models on fal.ai) ---------------------------------
+  // SDXL models like short, descriptive prompts. A face reference (IP-Adapter) keeps a woman's face the same.
+  const FAL_MODELS = {
+    dreamshaper: 'Lykon/dreamshaper-xl-1-0',
+    animagine: 'cagliostrolab/animagine-xl-4.0',
+    realvis: 'SG161222/RealVisXL_V5.0',
+  };
+  const falModelOf = (settings) =>
+    settings.falModel === 'custom' ? String(settings.falCustomModel || '').trim() || FAL_MODELS.dreamshaper : FAL_MODELS[settings.falModel] || FAL_MODELS.dreamshaper;
+  const SD_STYLE = {
+    photo: 'photorealistic, cinematic film still, 35mm photograph, natural skin texture, soft natural light',
+    painting: 'semi-realistic digital painting, soft brushwork, painterly lighting',
+    anime: 'anime illustration, clean lineart, cel shading, vibrant colors',
+  };
+  // Things the picture must never contain, plus common quality problems.
+  const SD_NEGATIVE =
+    'nude, naked, nipples, topless, nsfw, explicit, sex, genitals, child, kid, teen, underage, loli, ' +
+    'lowres, worst quality, low quality, bad anatomy, bad hands, extra fingers, missing fingers, deformed face, blurry, text, watermark, signature, logo';
+  const SD_VIEWER = { man: 'the viewer is an adult man, seen from behind or partly out of frame', woman: 'the viewer is an adult woman, seen from behind or partly out of frame' };
+
+  function sdPrompt(story, girls, scene, settings) {
+    const style = SD_STYLE[settings.pictureStyle] || story.artStyle;
+    const count = girls.length === 1 ? '1girl, solo, adult woman' : `${girls.length}girls, adult women`;
+    const who = girls.map((g) => g.appearance.replace(/\s+/g, ' ')).join(' | ');
+    const viewer = /viewer/i.test(scene) ? SD_VIEWER[settings.userGender] || '' : '';
+    return [style, count, who, scene, viewer, 'masterpiece, best quality, highly detailed, beautiful detailed eyes'].filter(Boolean).join(', ');
+  }
+
+  async function falImage(prompt, settings, reference = null) {
+    const input = {
+      model_name: falModelOf(settings),
+      prompt,
+      negative_prompt: SD_NEGATIVE,
+      image_size: 'portrait_4_3',
+      num_inference_steps: 30,
+      guidance_scale: 6.5,
+      prompt_weighting: true, // allows prompts longer than 77 tokens
+      enable_safety_checker: true, // fal blocks nudity
+      num_images: 1,
+      image_format: 'jpeg',
+    };
+    if (reference) {
+      input.ip_adapter = [
+        {
+          ip_adapter_image_url: reference,
+          path: 'h94/IP-Adapter',
+          model_subfolder: 'sdxl_models',
+          weight_name: 'ip-adapter-plus-face_sdxl_vit-h.safetensors',
+          scale: 0.7,
+        },
+      ];
+      input.image_encoder_path = 'h94/IP-Adapter';
+      input.image_encoder_subfolder = 'models/image_encoder';
+    }
+    let res;
+    try {
+      res = await fetch('/api/fal/fal-ai/lora', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (settings.password || '') },
+        body: JSON.stringify(input),
+      });
+    } catch {
+      throw new ApiError(t('errNetwork'), 'network');
+    }
+    if (res.headers.get('x-kindred-server') !== '1') {
+      throw new ApiError(t('errNotWorker', { status: res.status, snippet: snippet(await res.text().catch(() => '')) }), 'setup');
+    }
+    if (!res.ok || !/^image\//.test(res.headers.get('content-type') || '')) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) throw new ApiError(t('errPassword'), 'auth');
+      throw new ApiError(data.error?.message || `fal.ai error ${res.status}`, data.error?.setup ? 'setup' : 'other');
+    }
+    if (res.headers.get('x-fal-flagged') === '1') throw new ApiError(t('errNoPicture'), 'blocked');
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new ApiError(t('errNoPicture')));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // ---- Drawing, with whichever picture maker is chosen in Settings -------------------
+  async function drawPortrait(story, girl, settings) {
+    const style = styleFor(story, settings);
+    if (settings.imageProvider === 'fal') {
+      const scene = `upper body portrait, facing the viewer, ${girl.personality.split('.')[0].toLowerCase()} expression, softly blurred background`;
+      return falImage(sdPrompt(story, [girl], scene, settings), settings);
+    }
+    return image(portraitPrompt(story, girl, style.text), settings);
+  }
+
+  // girls: the women in the picture; refs: portraits of the first refs.length of them, in the same order.
+  async function drawScene(story, girls, scene, refs, settings) {
+    if (settings.imageProvider === 'fal') {
+      // One face reference: the main woman. More would blend their faces together.
+      return falImage(sdPrompt(story, girls, scene, settings), settings, refs[0] || null);
+    }
+    const list = /lite/i.test(settings.imageModel) ? refs.slice(0, 1) : refs; // the Lite model takes one reference only
+    return image(scenePrompt(story, girls, scene, list.length, settings.userGender, styleFor(story, settings).text), settings, list);
   }
 
   // ---- Video (Veo on Vertex AI) ----------------------------------------------------
@@ -499,8 +602,9 @@ Keep the look of the image exactly (${style}), and keep the people and the compo
     chatReply,
     image,
     styleFor,
-    portraitPrompt,
-    scenePrompt,
+    drawPortrait,
+    drawScene,
+    FAL_MODELS,
     videoStart,
     videoPoll,
     ping,

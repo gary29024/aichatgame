@@ -70,11 +70,27 @@ Your phone ──(password)──▶ Cloudflare Worker ──▶ Cloudflare AI G
 3. Open `https://aichatgame.<your-name>.workers.dev`, type your password, then go to **Settings → Test connection**. You should see ✓.
 4. On iPhone, open the link in Safari → **Share → Add to Home Screen**.
 
+### Optional: open-source picture models (fal.ai)
+
+Instead of Google's Nano Banana, pictures can be drawn by open-source **SDXL** models, the kind character-chat apps commonly use, running on **fal.ai**. A face reference (IP-Adapter) keeps each woman's face the same. Nudity is always blocked: fal's safety filter stays on, and the prompts rule out nudity and anyone underage.
+
+1. Make an account at <https://fal.ai>, add some credit, and create an **API key** (Dashboard → Keys).
+2. In Cloudflare, open your Worker → **Settings → Variables and Secrets**, and add `FAL_KEY` (type **Secret**) with that key. Requests go through your AI Gateway automatically.
+3. In the app: **Settings → Picture maker → Open-source models (fal.ai)**, then pick a model:
+   - **DreamShaper XL**: semi-realistic "2.5D"
+   - **Animagine XL 4**: anime (set **Picture style → Anime** with this one)
+   - **RealVis XL 5**: realistic
+   - **Other**: any SDXL model's Hugging Face ID, or a direct link to a model file
+4. Each portrait is redrawn once in the new model, then everything stays consistent.
+
+fal bills this model by GPU time rather than a fixed price per picture. Check your fal dashboard after a few pictures to see what you're spending.
+
 ### If something doesn't work
 
 | Message | What to do |
 |---|---|
 | *Server setup is incomplete. Missing: …* | Add the variable it names (Part C, step 2). |
+| *FAL_KEY is not set on the Worker* | Add the `FAL_KEY` secret (see "Optional: open-source picture models"), or switch **Picture maker** back to Google. |
 | *Cloud storage is not set up* / a Cloudflare build fails mentioning R2 | Create the R2 bucket `kindred-data` (Part B, step 5), then in your Worker → **Deployments** click **Retry build**. |
 | *Wrong or missing app password* | Re-enter the password in Settings. |
 | *Model … was not found*, or a "location" / "region" error | Some models only run in certain Google regions. Try another model in **Settings → Advanced**, or add these Worker variables: `GCP_LOCATION_TEXT` and `GCP_LOCATION_IMAGE` (the default `global` usually works for the newest models; `us-central1` works for e.g. `gemini-2.5-flash` and `gemini-2.5-flash-image`). Videos use `GCP_LOCATION_VIDEO` (default `us-central1`). |
@@ -106,7 +122,9 @@ Cloudflare's free plan is enough for personal use.
 | Language | English, or Traditional Chinese with Cantonese characters. |
 | Your name | What characters call you. |
 | You play as | A man (default), a woman, or not specified. Characters and pictures treat you accordingly. |
-| Pictures | *When the scene changes* (default), *every reply*, or *only when I tap 🎨*. |
+| Pictures | *When something is worth seeing* (default, about every 2–3 replies), *every reply*, or *only when I tap 🎨*. |
+| Picture maker | Google Nano Banana (default) or open-source SDXL models on fal.ai (needs `FAL_KEY`). |
+| Picture style | Realistic photo (default), painted, anime, or each character's own style. Changing it redraws each portrait once. |
 | Picture motion | Gentle movement on still pictures (free). |
 | Video length | 4, 6 or 8 seconds for 🎬 videos. |
 | Romance level | *Mature* allows adult romance and intimate moments once the relationship has built up. *Flirty* stops at kissing. *Sweet* keeps it wholesome. |
