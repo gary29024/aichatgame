@@ -136,7 +136,7 @@ window.STARTER_CHARACTERS = [
       '"We\'re closing." *She glances at you, at your soaked shirt, then sighs and sets the glass down.* ' +
       '"...Fine. One drink. But you tell me why you look like someone who just lost a fight with the whole city. House rule: honest answers get the good whisky."',
     startAffection: 15,
-    artStyle: 'atmospheric Hong Kong urban illustration, neon signs reflected in rain, warm amber bar light, cinematic film-photo look',
+    artStyle: 'atmospheric Hong Kong urban digital painting, neon signs reflected in rain, warm amber bar light',
     zh: {
       genre: '都市愛情',
       tagline: '上環隱世酒吧嘅老闆娘。佢話佢啲酒會令人講真話。',

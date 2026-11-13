@@ -277,30 +277,58 @@ ${memories}
     return `data:${img.inlineData.mimeType || 'image/png'};base64,${img.inlineData.data}`;
   }
 
-  const portraitPrompt = (char) => `Character portrait for an interactive story. ${char.artStyle}.
+  // ---- Picture style ------------------------------------------------------------
+  // One fixed style for every picture keeps a character looking the same from picture to picture.
+  const STYLE_PRESETS = {
+    photo:
+      'Photorealistic cinematic photograph, like a still from a live-action film: real camera, 50mm lens, natural skin texture, ' +
+      'realistic lighting and shadows, shallow depth of field, subtle film grain. NOT an illustration, NOT a painting, NOT anime, NOT a 3D render.',
+    painting:
+      'Semi-realistic digital painting with soft visible brushwork and painterly lighting. NOT a photograph, NOT anime, NOT a 3D render.',
+    anime: 'High-quality anime illustration with clean line art, cel shading and vibrant colours. NOT a photograph, NOT a painting, NOT a 3D render.',
+  };
+  // Returns { key, text }: key changes whenever the look changes (used to know when a portrait must be redrawn).
+  function styleFor(char, settings) {
+    const mode = STYLE_PRESETS[settings.pictureStyle] ? settings.pictureStyle : 'character';
+    if (mode !== 'character') return { key: mode, text: STYLE_PRESETS[mode] };
+    return { key: 'c:' + char.artStyle, text: `${char.artStyle}. Use this exact art style and medium consistently.` };
+  }
+
+  const portraitPrompt = (char, style) => `STYLE: ${style}
+
+Character portrait for an interactive story.
 ${char.name}, an adult (${char.age}). ${char.appearance}
 Upper body, facing the viewer with an expression that fits this personality: ${char.personality.split('.')[0]}.
 Softly blurred background that hints at: ${char.scenario}
-Single character, no text, no captions, no watermark, no speech bubbles.`;
+Single character, no text, no captions, no watermark, no speech bubbles.
+Remember the style: ${style}`;
 
   const VIEWER = {
     man: 'If "the viewer" or the user appears, he is an adult man (seen partly, from behind or over the shoulder, never the focus).',
     woman: 'If "the viewer" or the user appears, she is an adult woman (seen partly, from behind or over the shoulder, never the focus).',
   };
-  const scenePrompt = (char, scene, hasReference, userGender) => `Illustration for an interactive story. ${char.artStyle}.
-${hasReference ? `The reference image shows ${char.name}; keep their face, hair and overall look consistent with it.\n` : ''}${char.name} (adult): ${char.appearance}
+  const scenePrompt = (char, scene, hasReference, userGender, style) => `STYLE: ${style}
+
+A new picture for an interactive story.
+${
+  hasReference
+    ? `The reference image shows ${char.name}. Keep their face, hair and body exactly the same, AND match the reference image's look exactly: same medium, same realism, same lighting and colour treatment. The new picture must look like it belongs to the same set as the reference.\n`
+    : ''
+}${char.name} (adult): ${char.appearance}
 Scene: ${scene}
 ${VIEWER[userGender] || ''}
-${char.name} is the main subject. All people shown are adults. No text, no captions, no watermark, no speech bubbles.`;
+${char.name} is the main subject. All people shown are adults. No text, no captions, no watermark, no speech bubbles.
+Remember the style: ${style}`;
 
   // ---- Video (Veo on Vertex AI) ----------------------------------------------------
   // Starting a video returns an "operation" name; we then ask every few seconds whether it is done.
   async function videoStart(char, scene, imageDataUrl, settings) {
     const img = splitDataUrl(imageDataUrl);
     if (!img) throw new ApiError(t('errNoVideo'));
-    const prompt = `Animate this illustration of ${char.name}. Scene: ${scene || char.scenario}
+    const style = styleFor(char, settings).text;
+    const prompt = `Animate this image of ${char.name}. Scene: ${scene || char.scenario}
 Subtle, natural motion: breathing, blinking, hair and clothing moving gently, one small expressive gesture, soft ambient movement in the background, slow cinematic push-in.
-Keep the art style (${char.artStyle}), the character's look and the composition exactly as in the image. All people shown are adults. No text or captions.`;
+Keep the look of the image exactly (${style}), and keep the character and the composition the same. All people shown are adults. No text or captions.`;
     const data = await call(`video/start/${encodeURIComponent(settings.videoModel)}`, {
       password: settings.password,
       model: settings.videoModel,
@@ -354,6 +382,7 @@ Keep the art style (${char.artStyle}), the character's look and the composition 
     image,
     portraitPrompt,
     scenePrompt,
+    styleFor,
     videoStart,
     videoPoll,
     ping,

@@ -9,6 +9,7 @@
     language: I18N.guess(),
     userName: '',
     userGender: 'man',
+    pictureStyle: 'photo', // 'photo' | 'painting' | 'anime' | 'character'
     textModel: 'gemini-3.8-flash',
     imageModel: 'gemini-nano-banana-2.1',
     videoModel: 'veo-3.1-fast-generate-001',
@@ -70,7 +71,7 @@
   };
 
   function emptyIndex() {
-    return { v: 3, progress: {}, unlocks: {}, portraits: {}, videos: {} };
+    return { v: 3, progress: {}, unlocks: {}, portraits: {}, portraitStyles: {}, videos: {} };
   }
 
   // ---------- Small helpers ----------
@@ -377,7 +378,10 @@
   const msKey = (char, at) => `ms:${char.id}:${at}`;
   const isCurrent = (char, chat) => S.char && S.char.id === char.id && S.chat === chat;
   const picturesOn = () => S.settings.pictureMode !== 'off';
-  const scenePrompt = (char, scene, hasRef) => Api.scenePrompt(char, scene, hasRef, S.settings.userGender);
+  const styleOf = (char) => Api.styleFor(char, S.settings);
+  const scenePrompt = (char, scene, hasRef) => Api.scenePrompt(char, scene, hasRef, S.settings.userGender, styleOf(char).text);
+  // The portrait is the reference for every picture, so it must be drawn in the current style.
+  const portraitOk = (char) => Boolean(S.portraits[char.id]) && S.index.portraitStyles[char.id] === styleOf(char).key;
 
   // ---------- Navigation (uses the address bar so the phone's back button works) ----------
   function route() {
@@ -524,7 +528,7 @@
     $('#chat').style.setProperty('--c', safeColor(char.color));
     renderChat(true);
     if (fresh && picturesOn()) drawScene(char, chat, chat.messages[0]);
-    else if (!S.portraits[id] && picturesOn()) ensurePortrait(char);
+    else if (!portraitOk(char) && picturesOn()) ensurePortrait(char);
     checkMilestones(char, chat);
   }
 
@@ -712,15 +716,17 @@
 
   // ---------- Pictures ----------
   function ensurePortrait(char, force = false) {
-    if (!force && S.portraits[char.id]) return Promise.resolve(S.portraits[char.id]);
+    if (!force && portraitOk(char)) return Promise.resolve(S.portraits[char.id]);
     if (S.portraitJobs.has(char.id)) return S.portraitJobs.get(char.id);
     const job = (async () => {
       try {
-        const url = await Api.image(Api.portraitPrompt(char), S.settings);
+        const style = styleOf(char);
+        const url = await Api.image(Api.portraitPrompt(char, style.text), S.settings);
         const oldId = S.index.portraits[char.id];
         const pid = uid();
         await putImage(pid, url);
         S.index.portraits[char.id] = pid;
+        S.index.portraitStyles[char.id] = style.key;
         S.portraits[char.id] = url;
         await saveIndex();
         if (oldId) deleteMedia(oldId);
@@ -1090,6 +1096,13 @@
         ['every', t('picEvery')],
         ['off', t('picOff')],
       ])}</label>
+      <label>${esc(t('pictureStyle'))}${selectHtml('pictureStyle', s.pictureStyle, [
+        ['photo', t('styPhoto')],
+        ['painting', t('styPainting')],
+        ['anime', t('styAnime')],
+        ['character', t('styCharacter')],
+      ])}</label>
+      <p class="hint">${esc(t('styleHint'))}</p>
       <label>${esc(t('motion'))}${selectHtml('motion', s.motion, [
         ['on', t('motionOn')],
         ['off', t('motionOff')],
@@ -1136,6 +1149,7 @@
           userName: String(f.get('userName') || '').trim(),
           userGender: String(f.get('userGender')),
           pictureMode: String(f.get('pictureMode')),
+          pictureStyle: String(f.get('pictureStyle')),
           motion: String(f.get('motion')),
           videoSeconds: String(f.get('videoSeconds')),
           romance: String(f.get('romance')),
@@ -1277,6 +1291,7 @@
   async function forgetPortrait(id) {
     const pid = S.index.portraits[id];
     delete S.index.portraits[id];
+    delete S.index.portraitStyles[id];
     delete S.portraits[id];
     await saveIndex();
     if (pid) await deleteMedia(pid);
@@ -1300,6 +1315,7 @@
     S.galleries.delete(id);
     delete S.portraits[id];
     delete S.index.portraits[id];
+    delete S.index.portraitStyles[id];
     delete S.index.progress[id];
     delete S.index.unlocks[id];
     await saveIndex();
